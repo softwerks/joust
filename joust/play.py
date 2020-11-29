@@ -12,17 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Sequence
+from typing import Any
+import uuid
 
-import starlette.applications
-import starlette.routing
+import starlette.endpoints
+import starlette.websockets
 
-from joust import play
 
-routes: Sequence[starlette.routing.BaseRoute] = [
-    starlette.routing.WebSocketRoute("/socket/play/{game_id:uuid}", play.GameEndpoint)
-]
+class GameEndpoint(starlette.endpoints.WebSocketEndpoint):
+    encoding: str = "text"
 
-app: starlette.applications.Starlette = starlette.applications.Starlette(
-    debug=True, routes=routes
-)
+    async def on_connect(self, websocket: starlette.websockets.WebSocket):
+        print(websocket.headers)
+        await websocket.accept()
+
+    async def on_receive(
+        self, websocket: starlette.websockets.WebSocket, data: Any
+    ) -> None:
+        game_id: uuid.UUID = websocket.path_params["game_id"]
+        print(game_id)
+        await websocket.send_text(f"Message text was: {data}")

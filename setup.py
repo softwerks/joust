@@ -19,10 +19,10 @@ with open("README.md", encoding="utf-8") as f:
 
 setup(
     name="joust",
-    version="0.1.0",
+    version="0.1.1",
     author="Softwerks",
     author_email="info@softwerks.com",
-    description="Game service.",
+    description="Game service for the Backgammon Network.",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/softwerks/joust",
@@ -33,4 +33,5 @@ setup(
         "Operating System :: OS Independent",
     ],
     python_requires=">=3.7",
+    install_requires=["starlette"],
 )
