@@ -12,18 +12,3 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Sequence
-
-import starlette.applications
-import starlette.routing
-
-from joust import play
-from joust import settings
-
-routes: Sequence[starlette.routing.BaseRoute] = [
-    starlette.routing.WebSocketRoute("/socket/play/{game_id:uuid}", play.GameEndpoint)
-]
-
-app: starlette.applications.Starlette = starlette.applications.Starlette(
-    debug=settings.DEBUG, routes=routes
-)
