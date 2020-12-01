@@ -12,5 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from joust import config
-from joust import server
+import argparse
+import logging
+from typing import Tuple
+
+parser: argparse.ArgumentParser = argparse.ArgumentParser(
+    description="Joust Websocket Server"
+)
+
+levels: Tuple[str, ...] = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+parser.add_argument("-l", "--log-level", default="INFO", type=str, choices=levels)
+parser.add_argument("-p", "--port", default=5555, type=int, help="port number")
+
+args: argparse.Namespace = parser.parse_args()
+
+logging.basicConfig(level=args.log_level)
+
+PORT: int = args.port

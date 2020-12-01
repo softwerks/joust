@@ -22,7 +22,7 @@ setup(
     version="0.1.1",
     author="Softwerks",
     author_email="info@softwerks.com",
-    description="Game service for the Backgammon Network.",
+    description="Websocket server for the Backgammon Network.",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/softwerks/joust",
@@ -33,4 +33,5 @@ setup(
         "Operating System :: OS Independent",
     ],
     python_requires=">=3.7",
+    install_requires=["websockets"],
 )

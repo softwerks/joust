@@ -12,5 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from joust import config
-from joust import server
+import joust
+
+server: joust.server.Server = joust.server.Server(port=joust.config.PORT)
+server.run()
