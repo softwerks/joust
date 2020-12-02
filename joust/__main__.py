@@ -16,7 +16,7 @@ import joust
 
 
 def main() -> None:
-    server: joust.server.Server = joust.server.Server(port=joust.config.PORT)
+    server: joust.server.Server = joust.server.Server()
     server.run()
 
 

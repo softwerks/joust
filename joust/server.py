@@ -23,8 +23,7 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 
 class Server:
-    def __init__(self, *, port: int = 5555):
-        self.port: int = port
+    def __init__(self):
         self.loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
         self.shutdown: asyncio.Future = self.loop.create_future()
         self.loop.add_signal_handler(signal.SIGINT, self.shutdown.set_result, None)
@@ -43,8 +42,8 @@ class Server:
             async with websockets.unix_serve(self.handler, joust.config.UNIX_SOCKET):
                 await self.shutdown
         else:
-            logger.info(f"Running on localhost:{self.port}")
-            async with websockets.serve(self.handler, "localhost", self.port):
+            logger.info(f"Running on localhost:{joust.config.PORT}")
+            async with websockets.serve(self.handler, "localhost", joust.config.PORT):
                 await self.shutdown
 
     def run(self):
