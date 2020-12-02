@@ -34,4 +34,5 @@ setup(
     ],
     python_requires=">=3.7",
     install_requires=["websockets"],
+    entry_points={"console_scripts": ["joust=joust.__main__:main"]},
 )

@@ -14,5 +14,11 @@
 
 import joust
 
-server: joust.server.Server = joust.server.Server(port=joust.config.PORT)
-server.run()
+
+def main() -> None:
+    server: joust.server.Server = joust.server.Server(port=joust.config.PORT)
+    server.run()
+
+
+if __name__ == "__main__":
+    main()
