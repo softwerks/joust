@@ -17,6 +17,8 @@ import logging
 import signal
 import websockets
 
+import joust
+
 logger: logging.Logger = logging.getLogger(__name__)
 
 
@@ -30,17 +32,23 @@ class Server:
     async def handler(
         self, websocket: websockets.server.WebSocketServerProtocol, path: str
     ):
-        logger.info (f"{websocket.remote_address} - {path} [opened]")
+        logger.info(f"{websocket.remote_address} - {path} [opened]")
         async for message in websocket:
             await websocket.send(message)
-        logger.info (f"{websocket.remote_address} - {path} [closed]")
+        logger.info(f"{websocket.remote_address} - {path} [closed]")
 
     async def serve(self):
-        async with websockets.serve(self.handler, "localhost", self.port):
-            await self.shutdown
+        if joust.config.UNIX_SOCKET is not None:
+            logger.info(f"Running on {joust.config.UNIX_SOCKET}")
+            async with websockets.unix_serve(self.handler, joust.config.UNIX_SOCKET):
+                await self.shutdown
+        else:
+            logger.info(f"Running on localhost:{self.port}")
+            async with websockets.serve(self.handler, "localhost", self.port):
+                await self.shutdown
 
     def run(self):
-        logger.info(f"Starting server on localhost:{self.port} (Press CTRL+C to quit)")
+        logger.info(f"Starting server (Press CTRL+C to quit)")
         self.loop.run_until_complete(self.serve())
         logger.info("Shutting down")
         self.loop.stop()
