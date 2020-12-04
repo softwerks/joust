@@ -26,7 +26,8 @@ class Server:
     def __init__(self):
         self.loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
         self.shutdown: asyncio.Future = self.loop.create_future()
-        self.loop.add_signal_handler(signal.SIGINT, self.shutdown.set_result, None)
+        for s in [signal.SIGINT, signal.SIGTERM]:
+            self.loop.add_signal_handler(s, self.shutdown.set_result, None)
 
     async def handler(
         self, websocket: websockets.server.WebSocketServerProtocol, path: str
@@ -43,7 +44,9 @@ class Server:
                 await self.shutdown
         else:
             logger.info(f"Running on localhost:{joust.config.PORT}")
-            async with websockets.serve(self.handler, "localhost", joust.config.PORT, reuse_port=True):
+            async with websockets.serve(
+                self.handler, "localhost", joust.config.PORT, reuse_port=True
+            ):
                 await self.shutdown
 
     def run(self):
