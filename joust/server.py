@@ -43,7 +43,7 @@ class Server:
                 await self.shutdown
         else:
             logger.info(f"Running on localhost:{joust.config.PORT}")
-            async with websockets.serve(self.handler, "localhost", joust.config.PORT):
+            async with websockets.serve(self.handler, "localhost", joust.config.PORT, reuse_port=True):
                 await self.shutdown
 
     def run(self):
