@@ -13,13 +13,57 @@
 # limitations under the License.
 
 import asyncio
+import base64
+import http
 import logging
 import signal
+from typing import Optional
+import urllib.parse
+import uuid
+
 import websockets
 
 import joust
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+
+class ServerProtocol(websockets.WebSocketServerProtocol):
+    async def process_request(
+        self, path: str, request_headers: websockets.http.Headers
+    ) -> Optional[websockets.server.HTTPResponse]:
+        parsed_url: urllib.parse.ParseResult = urllib.parse.urlparse(path)
+        query_params: dict = urllib.parse.parse_qs(parsed_url.query)
+
+        try:
+            game_id: uuid.UUID = uuid.UUID(parsed_url.path.rsplit("/", 1)[-1])
+        except ValueError:
+            return (http.HTTPStatus.BAD_REQUEST, [], b"")
+
+        try:
+            encoded_token: str = query_params["token"][0]
+        except KeyError:
+            return (
+                http.HTTPStatus.UNAUTHORIZED,
+                [("WWW-Authenticate", "Token")],
+                b"Missing credentials\n",
+            )
+
+        try:
+            token: uuid.UUID = uuid.UUID(bytes=base64.urlsafe_b64decode(encoded_token))
+        except ValueError:
+            return (
+                http.HTTPStatus.UNAUTHORIZED,
+                [("WWW-Authenticate", "Token")],
+                b"Unsupported credentials\n",
+            )
+
+        # authenticate user
+
+        self.game_id = game_id
+        self.token = token
+
+        return await super().process_request(path, request_headers)
 
 
 class Server:
@@ -32,20 +76,26 @@ class Server:
     async def handler(
         self, websocket: websockets.server.WebSocketServerProtocol, path: str
     ):
-        logger.info(f"{websocket.remote_address} - {path} [opened]")
+        logger.info(f"{websocket.remote_address} - {websocket.game_id} [opened]")
         async for message in websocket:
             await websocket.send(message)
-        logger.info(f"{websocket.remote_address} - {path} [closed]")
+        logger.info(f"{websocket.remote_address} - {websocket.game_id} [closed]")
 
     async def serve(self):
         if joust.config.UNIX_SOCKET is not None:
             logger.info(f"Running on {joust.config.UNIX_SOCKET}")
-            async with websockets.unix_serve(self.handler, joust.config.UNIX_SOCKET):
+            async with websockets.unix_serve(
+                self.handler, joust.config.UNIX_SOCKET, create_protocol=ServerProtocol
+            ):
                 await self.shutdown
         else:
             logger.info(f"Running on localhost:{joust.config.PORT}")
             async with websockets.serve(
-                self.handler, "localhost", joust.config.PORT, reuse_port=True
+                self.handler,
+                "localhost",
+                joust.config.PORT,
+                create_protocol=ServerProtocol,
+                reuse_port=True,
             ):
                 await self.shutdown
 
