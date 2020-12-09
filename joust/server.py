@@ -23,7 +23,7 @@ import uuid
 
 import websockets
 
-import joust
+from . import config
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -82,18 +82,18 @@ class Server:
         logger.info(f"{websocket.remote_address} - {websocket.game_id} [closed]")
 
     async def serve(self):
-        if joust.config.UNIX_SOCKET is not None:
-            logger.info(f"Running on {joust.config.UNIX_SOCKET}")
+        if config.UNIX_SOCKET is not None:
+            logger.info(f"Running on {config.UNIX_SOCKET}")
             async with websockets.unix_serve(
-                self.handler, joust.config.UNIX_SOCKET, create_protocol=ServerProtocol
+                self.handler, config.UNIX_SOCKET, create_protocol=ServerProtocol
             ):
                 await self.shutdown
         else:
-            logger.info(f"Running on localhost:{joust.config.PORT}")
+            logger.info(f"Running on localhost:{config.PORT}")
             async with websockets.serve(
                 self.handler,
                 "localhost",
-                joust.config.PORT,
+                config.PORT,
                 create_protocol=ServerProtocol,
                 reuse_port=True,
             ):
