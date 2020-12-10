@@ -73,9 +73,7 @@ class Server:
         for s in [signal.SIGINT, signal.SIGTERM]:
             self.loop.add_signal_handler(s, self.shutdown.set_result, None)
 
-    async def handler(
-        self, websocket: websockets.server.WebSocketServerProtocol, path: str
-    ):
+    async def handler(self, websocket: ServerProtocol, path: str):
         logger.info(f"{websocket.remote_address} - {websocket.game_id} [opened]")
         async for message in websocket:
             await websocket.send(message)
