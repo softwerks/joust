@@ -34,5 +34,6 @@ setup(
     ],
     python_requires=">=3.7",
     install_requires=["websockets"],
+    extras_require={"dev": ["hupper"], "dev-opt": ["watchdog"]},
     entry_points={"console_scripts": ["joust=joust.__main__:main"]},
 )

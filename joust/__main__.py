@@ -12,12 +12,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import joust
+import logging
+
+try:
+    import hupper
+except ImportError:
+    hupper = None
+
+from . import config
+from . import server
+
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 def main() -> None:
-    server: joust.server.Server = joust.server.Server()
-    server.run()
+    if config.RELOAD:
+        if hupper is None:
+            logger.error(
+                "reload requires hupper - install with 'pip install -e .[dev]'"
+            )
+        else:
+            reloader: hupper.interfaces.IReloaderProxy = hupper.start_reloader(
+                "joust.__main__.main"
+            )
+    serv: server.Server = server.Server()
+    serv.run()
 
 
 if __name__ == "__main__":
