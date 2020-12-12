@@ -38,24 +38,17 @@ class ServerProtocol(websockets.WebSocketServerProtocol):
         try:
             game_id: uuid.UUID = uuid.UUID(parsed_url.path.rsplit("/", 1)[-1])
         except ValueError:
+            logger.info(f"Invalid or missing game ID: {parsed_url.path}")
             return (http.HTTPStatus.BAD_REQUEST, [], b"")
 
         try:
-            encoded_token: str = query_params["token"][0]
+            token: str = query_params["token"][0]
         except KeyError:
+            logger.info(f"Missing credentials: {query_params}")
             return (
                 http.HTTPStatus.UNAUTHORIZED,
                 [("WWW-Authenticate", "Token")],
                 b"Missing credentials\n",
-            )
-
-        try:
-            token: uuid.UUID = uuid.UUID(bytes=base64.urlsafe_b64decode(encoded_token))
-        except ValueError:
-            return (
-                http.HTTPStatus.UNAUTHORIZED,
-                [("WWW-Authenticate", "Token")],
-                b"Unsupported credentials\n",
             )
 
         # authenticate user
