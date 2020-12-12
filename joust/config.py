@@ -24,14 +24,18 @@ levels: Tuple[str, ...] = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 parser.add_argument("-l", "--log-level", default="INFO", type=str, choices=levels)
 parser.add_argument("-p", "--port", default=5555, type=int, help="port number")
 parser.add_argument(
-    "-r", "--reload", default=False, action="store_true", help="enable auto reload"
+    "-r", "--redis", default="redis://localhost:6379", help="redis connection string"
 )
 parser.add_argument("-u", "--unix-socket", type=str, help="UNIX domain socket")
+parser.add_argument(
+    "--reload", default=False, action="store_true", help="enable auto reload"
+)
 
 args: argparse.Namespace = parser.parse_args()
 
 logging.basicConfig(level=args.log_level)
 
 PORT: int = args.port
-RELOAD: bool = args.reload
+REDIS: str = args.redis
 UNIX_SOCKET: str = args.unix_socket
+RELOAD: bool = args.reload
