@@ -109,7 +109,7 @@ class Server:
                 "localhost",
                 config.PORT,
                 create_protocol=functools.partial(ServerProtocol, self.redis),
-                reuse_port=True,
+                reuse_port=config.REUSE_PORT,
             ):
                 await self.shutdown
 

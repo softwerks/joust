@@ -28,6 +28,9 @@ parser.add_argument(
 )
 parser.add_argument("-u", "--unix-socket", type=str, help="UNIX domain socket")
 parser.add_argument(
+    "--reuse-port", default=False, action="store_true", help="set the SO_REUSEPORT socket option"
+)
+parser.add_argument(
     "--reload", default=False, action="store_true", help="enable auto reload"
 )
 
@@ -38,4 +41,5 @@ logging.basicConfig(level=args.log_level)
 PORT: int = args.port
 REDIS: str = args.redis
 UNIX_SOCKET: str = args.unix_socket
+REUSE_PORT: bool = args.reuse_port
 RELOAD: bool = args.reload
