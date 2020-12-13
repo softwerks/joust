@@ -28,7 +28,10 @@ parser.add_argument(
 )
 parser.add_argument("-u", "--unix-socket", type=str, help="UNIX domain socket")
 parser.add_argument(
-    "--reuse-port", default=False, action="store_true", help="set the SO_REUSEPORT socket option"
+    "--reuse-port",
+    default=False,
+    action="store_true",
+    help="set the SO_REUSEPORT socket option",
 )
 parser.add_argument(
     "--reload", default=False, action="store_true", help="enable auto reload"
