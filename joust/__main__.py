@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
 import logging
 
 try:
@@ -25,6 +26,11 @@ from . import server
 logger: logging.Logger = logging.getLogger(__name__)
 
 
+async def _serve() -> None:
+    async with server.Server() as serv:
+        await serv.serve()
+
+
 def main() -> None:
     if config.RELOAD:
         if hupper is None:
@@ -35,8 +41,7 @@ def main() -> None:
             reloader: hupper.interfaces.IReloaderProxy = hupper.start_reloader(
                 "joust.__main__.main"
             )
-    serv: server.Server = server.Server()
-    serv.run()
+    asyncio.run(_serve())
 
 
 if __name__ == "__main__":

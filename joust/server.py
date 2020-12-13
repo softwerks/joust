@@ -18,7 +18,8 @@ import functools
 import http
 import logging
 import signal
-from typing import Optional
+import types
+from typing import Optional, Type
 import urllib.parse
 import uuid
 
@@ -70,54 +71,54 @@ class ServerProtocol(websockets.WebSocketServerProtocol):
 
 
 class Server:
-    def __init__(self):
-        self.loop: asyncio.AbstractEventLoop = asyncio.get_event_loop()
-        self.redis: aioredis.Redis = self.loop.run_until_complete(self._init_redis())
-        self.shutdown: asyncio.Future = self.loop.create_future()
-        for s in [signal.SIGINT, signal.SIGTERM]:
-            self.loop.add_signal_handler(s, self.shutdown.set_result, None)
+    async def __aenter__(self) -> "Server":
+        await self.startup()
+        return self
 
-    async def _init_redis(self) -> aioredis.Redis:
-        redis: aioredis.Redis = await aioredis.create_redis_pool(config.REDIS)
+    async def __aexit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_value: Optional[BaseException],
+        traceback: Optional[types.TracebackType],
+    ) -> None:
+        await self.shutdown()
+
+    async def startup(self) -> None:
+        self.redis: aioredis.Redis = await aioredis.create_redis_pool(config.REDIS)
         logger.info(f"Redis connected on {config.REDIS}")
-        return redis
-
-    async def _close_redis(self) -> None:
-        self.redis.close()
-        await self.redis.wait_closed()
-        logger.info("Redis connection closed")
-
-    async def handler(self, websocket: ServerProtocol, path: str):
-        logger.info(f"{websocket.remote_address} - {websocket.game_id} [opened]")
-        async for message in websocket:
-            await websocket.send(message)
-        logger.info(f"{websocket.remote_address} - {websocket.game_id} [closed]")
+        self._shutdown: asyncio.Future = asyncio.get_running_loop().create_future()
+        for s in [signal.SIGINT, signal.SIGTERM]:
+            asyncio.get_running_loop().add_signal_handler(
+                s, self._shutdown.set_result, None
+            )
 
     async def serve(self):
         if config.UNIX_SOCKET is not None:
-            logger.info(f"Running on {config.UNIX_SOCKET}")
+            logger.info(f"Running on {config.UNIX_SOCKET} (Press CTRL+C to quit)")
             async with websockets.unix_serve(
-                self.handler,
+                self._handler,
                 config.UNIX_SOCKET,
                 create_protocol=functools.partial(ServerProtocol, self.redis),
             ):
-                await self.shutdown
+                await self._shutdown
         else:
-            logger.info(f"Running on localhost:{config.PORT}")
+            logger.info(f"Running on localhost:{config.PORT} (Press CTRL+C to quit)")
             async with websockets.serve(
-                self.handler,
+                self._handler,
                 "localhost",
                 config.PORT,
                 create_protocol=functools.partial(ServerProtocol, self.redis),
                 reuse_port=config.REUSE_PORT,
             ):
-                await self.shutdown
-
-    def run(self):
-        logger.info(f"Starting server (Press CTRL+C to quit)")
-        self.loop.run_until_complete(self.serve())
-        logger.info("Shutting down...")
-        self.loop.run_until_complete(self._close_redis())
-        self.loop.stop()
-        self.loop.close()
+                await self._shutdown
         logger.info("Server stopped")
+
+    async def _handler(self, websocket: ServerProtocol, path: str):
+        logger.info(f"{websocket.remote_address} - {websocket.game_id} [opened]")
+        async for message in websocket:
+            await websocket.send(message)
+        logger.info(f"{websocket.remote_address} - {websocket.game_id} [closed]")
+
+    async def shutdown(self) -> None:
+        self.redis.close()
+        await self.redis.wait_closed()
