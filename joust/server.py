@@ -83,26 +83,47 @@ class Server:
     ) -> None:
         await self.shutdown()
 
+    def _signal_workaround(self) -> None:
+        """Workaround signal issues on Windows
+
+        https://github.com/python/asyncio/issues/191
+        https://github.com/python/asyncio/issues/407
+        """
+        loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
+
+        async def wakeup() -> None:
+            while not self._shutdown.done():
+                await asyncio.sleep(0.1)
+
+        def signint_handler(signalnum: int, frame: types.FrameType):
+            self._shutdown.set_result(None)
+
+        signal.signal(signal.SIGINT, signint_handler)
+        loop.create_task(wakeup())
+
     async def startup(self) -> None:
         self.redis: aioredis.Redis = await aioredis.create_redis_pool(config.REDIS)
         logger.info(f"Redis connected on {config.REDIS}")
-        self._shutdown: asyncio.Future = asyncio.get_running_loop().create_future()
-        for s in [signal.SIGINT, signal.SIGTERM]:
-            asyncio.get_running_loop().add_signal_handler(
-                s, self._shutdown.set_result, None
-            )
+
+        loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
+        self._shutdown: asyncio.Future = loop.create_future()
+        try:
+            for s in [signal.SIGINT, signal.SIGTERM]:
+                loop.add_signal_handler(s, self._shutdown.set_result, None)
+        except NotImplementedError:
+            logger.warning("loop.add_signal_handler not supported, using workaround")
+            self._signal_workaround()
 
     async def serve(self):
         if config.UNIX_SOCKET is not None:
-            logger.info(f"Running on {config.UNIX_SOCKET} (Press CTRL+C to quit)")
             async with websockets.unix_serve(
                 self._handler,
                 config.UNIX_SOCKET,
                 create_protocol=functools.partial(ServerProtocol, self.redis),
             ):
+                logger.info(f"Running on {config.UNIX_SOCKET} (Press CTRL+C to quit)")
                 await self._shutdown
         else:
-            logger.info(f"Running on localhost:{config.PORT} (Press CTRL+C to quit)")
             async with websockets.serve(
                 self._handler,
                 "localhost",
@@ -110,6 +131,9 @@ class Server:
                 create_protocol=functools.partial(ServerProtocol, self.redis),
                 reuse_port=config.REUSE_PORT,
             ):
+                logger.info(
+                    f"Running on localhost:{config.PORT} (Press CTRL+C to quit)"
+                )
                 await self._shutdown
         logger.info("Server stopped")
 
@@ -122,3 +146,4 @@ class Server:
     async def shutdown(self) -> None:
         self.redis.close()
         await self.redis.wait_closed()
+        logger.info("Server shutdown")
