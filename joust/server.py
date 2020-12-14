@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import asyncio
-import base64
 import functools
 import http
 import logging
