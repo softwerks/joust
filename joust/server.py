@@ -17,8 +17,10 @@ import functools
 import http
 import logging
 import signal
+import socket
 import types
 from typing import Optional, Type
+import os
 import urllib.parse
 import uuid
 
@@ -114,6 +116,26 @@ class Server:
             self._signal_workaround()
 
     async def serve(self):
+        LISTEN_FDS: int = int(os.getenv("LISTEN_FDS", 0))
+        logger.info(f"LISTEN_FDS is {LISTEN_FDS}")
+        if LISTEN_FDS > 0:  # file descriptor(s) passed by the service manager
+            if LISTEN_FDS > 1:
+                raise ValueError(
+                    f"More than one ({LISTEN_FDS}) file descriptor was passed by the service manager"
+                )
+            SD_LISTEN_FDS_START: int = int(os.getenv("SD_LISTEN_FDS_START"))
+            logger.info(f"SD_LISTEN_FDS_START is {SD_LISTEN_FDS_START}")
+            sock = socket.socket(fileno=SD_LISTEN_FDS_START)
+            logger.info(sock)
+            logger.info()
+            async with websockets.unix_serve(
+                self._handler,
+                path=None,
+                sock=sock,
+                create_protocol=functools.partial(ServerProtocol, self.redis),
+            ):
+                logger.info(f"Running on something (Press CTRL+C to quit)")
+                await self._shutdown
         if config.UNIX_SOCKET is not None:
             async with websockets.unix_serve(
                 self._handler,
