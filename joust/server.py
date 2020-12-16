@@ -132,7 +132,7 @@ class Server:
             ):
                 logger.info(f"Running on {sock.getsockname()} (Press CTRL+C to quit)")
                 await self._shutdown
-        if config.UNIX_SOCKET is not None:
+        elif config.UNIX_SOCKET is not None:
             async with websockets.unix_serve(
                 self._handler,
                 config.UNIX_SOCKET,
