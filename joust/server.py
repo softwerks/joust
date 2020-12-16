@@ -123,11 +123,10 @@ class Server:
                 raise ValueError(
                     f"More than one ({LISTEN_FDS}) file descriptor was passed by the service manager"
                 )
-            SD_LISTEN_FDS_START: int = int(os.getenv("SD_LISTEN_FDS_START"))
-            logger.info(f"SD_LISTEN_FDS_START is {SD_LISTEN_FDS_START}")
+            SD_LISTEN_FDS_START: int = 3
             sock = socket.socket(fileno=SD_LISTEN_FDS_START)
             logger.info(sock)
-            logger.info()
+            logger.info(type(sock))
             async with websockets.unix_serve(
                 self._handler,
                 path=None,
