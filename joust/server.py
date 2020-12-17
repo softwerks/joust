@@ -130,7 +130,7 @@ class Server:
                 sock=sock,
                 create_protocol=functools.partial(ServerProtocol, self.redis),
             ):
-                logger.info(f"Running on {sock.getsockname()} (Press CTRL+C to quit)")
+                logger.info(f"Running on {sock.getsockname()}")
                 await self._shutdown
         elif config.UNIX_SOCKET is not None:
             async with websockets.unix_serve(
