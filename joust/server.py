@@ -172,8 +172,7 @@ class Server:
             await websocket.send(message)
             await self.redis.publish(channel_name, message)
 
-        self.redis.unsubscribe(channel)
-        await read_channel_task
+        await self.redis.unsubscribe(channel)
 
         logger.info(f"{websocket.remote_address} - {websocket.game_id} [closed]")
 
