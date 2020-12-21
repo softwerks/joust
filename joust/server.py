@@ -90,7 +90,6 @@ class Server:
         https://github.com/python/asyncio/issues/191
         https://github.com/python/asyncio/issues/407
         """
-        loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
 
         async def wakeup() -> None:
             while not self._shutdown.done():
@@ -100,17 +99,17 @@ class Server:
             self._shutdown.set_result(None)
 
         signal.signal(signal.SIGINT, signint_handler)
-        loop.create_task(wakeup())
+        self.loop.create_task(wakeup())
 
     async def startup(self) -> None:
         self.redis: aioredis.Redis = await aioredis.create_redis_pool(config.REDIS)
         logger.info(f"Redis connected on {config.REDIS}")
 
-        loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
-        self._shutdown: asyncio.Future = loop.create_future()
+        self.loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
+        self._shutdown: asyncio.Future = self.loop.create_future()
         try:
             for s in [signal.SIGINT, signal.SIGTERM]:
-                loop.add_signal_handler(s, self._shutdown.set_result, None)
+                self.loop.add_signal_handler(s, self._shutdown.set_result, None)
         except NotImplementedError:
             logger.warning("loop.add_signal_handler not supported, using workaround")
             self._signal_workaround()
@@ -155,9 +154,27 @@ class Server:
         logger.info("Server stopped")
 
     async def _handler(self, websocket: ServerProtocol, path: str):
+        async def read_channel(
+            channel: aioredis.Channel, websocket: ServerProtocol
+        ) -> None:
+            async for message in channel.iter():
+                print(message)
+
         logger.info(f"{websocket.remote_address} - {websocket.game_id} [opened]")
+
+        channel_name: str = "channel:" + str(websocket.game_id)
+        channel: aioredis.Channel = (await self.redis.subscribe(channel_name))[0]
+        read_channel_task: asyncio.Task = self.loop.create_task(
+            read_channel(channel, websocket)
+        )
+
         async for message in websocket:
             await websocket.send(message)
+            await self.redis.publish(channel_name, message)
+
+        self.redis.unsubscribe(channel)
+        await read_channel_task
+
         logger.info(f"{websocket.remote_address} - {websocket.game_id} [closed]")
 
     async def shutdown(self) -> None:
