@@ -19,7 +19,7 @@ import logging
 import signal
 import socket
 import types
-from typing import Optional, Type
+from typing import Dict, Optional, Set, Type
 import os
 import urllib.parse
 import uuid
@@ -72,6 +72,8 @@ class ServerProtocol(websockets.WebSocketServerProtocol):
 
 
 class Server:
+    channels: Dict[aioredis.Channel, Set[ServerProtocol]] = {}
+
     async def __aenter__(self) -> "Server":
         await self.startup()
         return self
@@ -154,25 +156,32 @@ class Server:
         logger.info("Server stopped")
 
     async def _handler(self, websocket: ServerProtocol, path: str):
-        async def read_channel(
-            channel: aioredis.Channel, websocket: ServerProtocol
-        ) -> None:
-            async for message in channel.iter():
-                print(message)
+        async def reader(message_queue: aioredis.Channel) -> None:
+            channel: str = message_queue.name.decode()
+            logger.info(f"Started listening to {channel}")
+            async for message in message_queue.iter():
+                logger.info(f"Received message on {channel}: {message}")
+                for websocket in self.channels[channel]:
+                    await websocket.send(str(message))
+            logger.info(f"Stopped listening to {channel}")
 
         logger.info(f"{websocket.remote_address} - {websocket.game_id} [opened]")
 
-        channel_name: str = "channel:" + str(websocket.game_id)
-        channel: aioredis.Channel = (await self.redis.subscribe(channel_name))[0]
-        read_channel_task: asyncio.Task = self.loop.create_task(
-            read_channel(channel, websocket)
-        )
+        channel: str = "channel:" + str(websocket.game_id)
+        if channel not in self.channels:
+            self.channels[channel] = set()
+            (message_queue,) = await self.redis.subscribe(channel)
+            self.loop.create_task(reader(message_queue))
+        self.channels[channel].add(websocket)
 
         async for message in websocket:
-            await websocket.send(message)
-            await self.redis.publish(channel_name, message)
+            await self.redis.publish(channel, message)
 
-        await self.redis.unsubscribe(channel)
+        self.channels[channel].remove(websocket)
+
+        if not self.channels[channel]:
+            await self.redis.unsubscribe(channel)
+            del self.channels[channel]
 
         logger.info(f"{websocket.remote_address} - {websocket.game_id} [closed]")
 
