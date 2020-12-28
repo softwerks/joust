@@ -34,6 +34,10 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 
 class ServerProtocol(websockets.WebSocketServerProtocol):
+    game_id: uuid.UUID
+    token: str
+    session_id: Optional[str]
+
     async def process_request(
         self, path: str, request_headers: websockets.http.Headers
     ) -> Optional[websockets.server.HTTPResponse]:
@@ -41,13 +45,13 @@ class ServerProtocol(websockets.WebSocketServerProtocol):
         query_params: dict = urllib.parse.parse_qs(parsed_url.query)
 
         try:
-            self.game_id: uuid.UUID = uuid.UUID(parsed_url.path.rsplit("/", 1)[-1])
+            self.game_id = uuid.UUID(parsed_url.path.rsplit("/", 1)[-1])
         except ValueError:
             logger.info(f"Invalid or missing game ID: {parsed_url.path}")
             return (http.HTTPStatus.BAD_REQUEST, [], b"")
 
         try:
-            self.token: str = query_params["token"][0]
+            self.token = query_params["token"][0]
         except KeyError:
             logger.info(f"Missing credentials: {query_params}")
             return (
@@ -57,7 +61,7 @@ class ServerProtocol(websockets.WebSocketServerProtocol):
             )
 
         async with redis.get_connection() as conn:
-            self.session_id: Optional[str] = await conn.get("websocket:" + self.token)
+            self.session_id = await conn.get("websocket:" + self.token)
         if self.session_id is None:
             logger.info(f"Invalid token: {self.token}")
             return (
@@ -71,6 +75,8 @@ class ServerProtocol(websockets.WebSocketServerProtocol):
 
 class Server:
     channels: Dict[aioredis.Channel, Set[ServerProtocol]] = {}
+    loop: asyncio.AbstractEventLoop
+    _shutdown: asyncio.Future
 
     async def __aenter__(self) -> "Server":
         await self.startup()
@@ -102,8 +108,8 @@ class Server:
         self.loop.create_task(wakeup())
 
     async def startup(self) -> None:
-        self.loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
-        self._shutdown: asyncio.Future = self.loop.create_future()
+        self.loop = asyncio.get_running_loop()
+        self._shutdown = self.loop.create_future()
         try:
             for s in [signal.SIGINT, signal.SIGTERM]:
                 self.loop.add_signal_handler(s, self._shutdown.set_result, None)
