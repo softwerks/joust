@@ -28,6 +28,7 @@ import aioredis
 import websockets
 
 from . import config
+from . import subprotocol
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -175,7 +176,13 @@ class Server:
         self.channels[channel].add(websocket)
 
         async for message in websocket:
-            await self.redis.publish(channel, message)
+            try:
+                result: str = await subprotocol.process_payload(message)
+                await self.redis.publish(channel, result)
+            except ValueError as error:
+                logger.warning(
+                    f"{websocket.remote_address} - {websocket.game_id}: {error}"
+                )
 
         self.channels[channel].remove(websocket)
 
