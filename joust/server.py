@@ -63,14 +63,13 @@ class Server:
             self._shutdown.set_result(None)
 
         signal.signal(signal.SIGINT, signint_handler)
-        self.loop.create_task(wakeup())
+        asyncio.get_running_loop().create_task(wakeup())
 
     async def startup(self) -> None:
-        self.loop = asyncio.get_running_loop()
-        self._shutdown = self.loop.create_future()
+        self._shutdown = asyncio.get_running_loop().create_future()
         try:
             for s in [signal.SIGINT, signal.SIGTERM]:
-                self.loop.add_signal_handler(s, self._shutdown.set_result, None)
+                asyncio.get_running_loop().add_signal_handler(s, self._shutdown.set_result, None)
         except NotImplementedError:
             logger.warning("loop.add_signal_handler not supported, using workaround")
             self._signal_workaround()
