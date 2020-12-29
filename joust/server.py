@@ -33,7 +33,6 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 
 class Server:
-    loop: asyncio.AbstractEventLoop
     _shutdown: asyncio.Future
 
     async def __aenter__(self) -> "Server":
