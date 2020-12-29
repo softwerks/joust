@@ -14,67 +14,25 @@
 
 import aioredis
 import asyncio
-import http
 import logging
 import signal
 import socket
 import types
 from typing import Dict, Optional, Set, Type
 import os
-import urllib.parse
-import uuid
 
 import websockets
 
+from . import channels
 from . import config
+from . import protocol
 from . import redis
 from . import subprotocol
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 
-class ServerProtocol(websockets.WebSocketServerProtocol):
-    game_id: uuid.UUID
-    token: str
-    session_id: Optional[str]
-
-    async def process_request(
-        self, path: str, request_headers: websockets.http.Headers
-    ) -> Optional[websockets.server.HTTPResponse]:
-        parsed_url: urllib.parse.ParseResult = urllib.parse.urlparse(path)
-        query_params: dict = urllib.parse.parse_qs(parsed_url.query)
-
-        try:
-            self.game_id = uuid.UUID(parsed_url.path.rsplit("/", 1)[-1])
-        except ValueError:
-            logger.info(f"Invalid or missing game ID: {parsed_url.path}")
-            return (http.HTTPStatus.BAD_REQUEST, [], b"")
-
-        try:
-            self.token = query_params["token"][0]
-        except KeyError:
-            logger.info(f"Missing credentials: {query_params}")
-            return (
-                http.HTTPStatus.UNAUTHORIZED,
-                [("WWW-Authenticate", "Token")],
-                b"Missing credentials\n",
-            )
-
-        async with redis.get_connection() as conn:
-            self.session_id = await conn.get("websocket:" + self.token)
-        if self.session_id is None:
-            logger.info(f"Invalid token: {self.token}")
-            return (
-                http.HTTPStatus.UNAUTHORIZED,
-                [("WWW-Authenticate", "Token")],
-                b"Invalid credentials\n",
-            )
-
-        return await super().process_request(path, request_headers)
-
-
 class Server:
-    channels: Dict[aioredis.Channel, Set[ServerProtocol]] = {}
     loop: asyncio.AbstractEventLoop
     _shutdown: asyncio.Future
 
@@ -127,13 +85,18 @@ class Server:
             SD_LISTEN_FDS_START: int = 3
             sock: socket.socket = socket.socket(fileno=SD_LISTEN_FDS_START)
             async with websockets.unix_serve(
-                self._handler, path=None, sock=sock, create_protocol=ServerProtocol,
+                self._handler,
+                path=None,
+                sock=sock,
+                create_protocol=protocol.ServerProtocol,
             ):
                 logger.info(f"Running on {sock.getsockname()}")
                 await self._shutdown
         elif config.UNIX_SOCKET is not None:
             async with websockets.unix_serve(
-                self._handler, config.UNIX_SOCKET, create_protocol=ServerProtocol,
+                self._handler,
+                config.UNIX_SOCKET,
+                create_protocol=protocol.ServerProtocol,
             ):
                 logger.info(f"Running on {config.UNIX_SOCKET} (Press CTRL+C to quit)")
                 await self._shutdown
@@ -142,7 +105,7 @@ class Server:
                 self._handler,
                 "localhost",
                 config.PORT,
-                create_protocol=ServerProtocol,
+                create_protocol=protocol.ServerProtocol,
                 reuse_port=config.REUSE_PORT,
             ):
                 logger.info(
@@ -151,43 +114,18 @@ class Server:
                 await self._shutdown
         logger.info("Server stopped")
 
-    async def _handler(self, websocket: ServerProtocol, path: str):
-        async def reader(message_queue: aioredis.Channel) -> None:
-            channel: str = message_queue.name.decode()
-            logger.info(f"Started listening to {channel}")
-            async for message in message_queue.iter():
-                logger.info(f"Received message on {channel}: {message}")
-                for websocket in self.channels[channel]:
-                    await websocket.send(str(message))
-            logger.info(f"Stopped listening to {channel}")
-
+    async def _handler(self, websocket: protocol.ServerProtocol, path: str):
         logger.info(f"{websocket.remote_address} - {websocket.game_id} [opened]")
-
-        channel: str = "channel:" + str(websocket.game_id)
-        if channel not in self.channels:
-            self.channels[channel] = set()
-            async with redis.get_connection() as conn:
-                (message_queue,) = await conn.subscribe(channel)
-            self.loop.create_task(reader(message_queue))
-        self.channels[channel].add(websocket)
-
-        async for message in websocket:
-            try:
-                result: str = await subprotocol.process_payload(message)
-                async with redis.get_connection() as conn:
-                    await conn.publish(channel, result)
-            except ValueError as error:
-                logger.warning(
-                    f"{websocket.remote_address} - {websocket.game_id}: {error}"
-                )
-
-        self.channels[channel].remove(websocket)
-
-        if not self.channels[channel]:
-            async with redis.get_connection() as conn:
-                await conn.unsubscribe(channel)
-            del self.channels[channel]
-
+        async with channels.get_channel(websocket):
+            async for message in websocket:
+                try:
+                    result: str = await subprotocol.process_payload(message)
+                    async with redis.get_connection() as conn:
+                        await conn.publish(str(websocket.game_id), result)
+                except ValueError as error:
+                    logger.warning(
+                        f"{websocket.remote_address} - {websocket.game_id} [error]: {error}"
+                    )
         logger.info(f"{websocket.remote_address} - {websocket.game_id} [closed]")
 
     async def shutdown(self) -> None:
