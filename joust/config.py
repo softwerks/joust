@@ -14,7 +14,7 @@
 
 import argparse
 import logging
-from typing import Tuple
+from typing import Callable, Tuple
 
 parser: argparse.ArgumentParser = argparse.ArgumentParser(
     description="Joust Websocket Server"
@@ -39,7 +39,11 @@ parser.add_argument(
 
 args: argparse.Namespace = parser.parse_args()
 
-logging.basicConfig(level=args.log_level)
+logging.basicConfig(
+    level=args.log_level,
+    format="[%(asctime)s] %(levelname)s %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 
 PORT: int = args.port
 REDIS: str = args.redis
