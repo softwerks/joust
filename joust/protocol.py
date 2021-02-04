@@ -53,7 +53,9 @@ class ServerProtocol(websockets.WebSocketServerProtocol):
             )
 
         async with redis.get_connection() as conn:
-            self.session_id = await conn.get("websocket:" + self.token)
+            self.session_id = await conn.get(
+                "websocket:" + self.token, encoding="utf-8"
+            )
         if self.session_id is None:
             logger.info(f"Invalid token: {self.token}")
             return (
