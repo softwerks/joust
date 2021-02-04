@@ -33,7 +33,7 @@ async def reader(message_queue: aioredis.Channel) -> None:
     c: str = message_queue.name.decode()
 
     logger.info(f"Started listening to {c}")
-    async for message in message_queue.iter():
+    async for message in message_queue.iter(encoding="utf-8"):
         logger.info(f"Broadcasting to {c}: {str(message)}")
         for websocket in channels[c]:
             await websocket.send(str(message))
