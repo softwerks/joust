@@ -4,6 +4,3 @@ __pycache__/
 build/
 dist/
 venv/
-
-# Starlette
-.env
