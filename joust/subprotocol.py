@@ -17,21 +17,40 @@ import json
 import jsonschema
 import logging
 from typing import Any, Dict, Union
+import uuid
+
+import aioredis
+import backgammon
+
+from . import redis
 
 logger: logging.Logger = logging.getLogger(__name__)
 
+
+@enum.unique
+class Opcode(enum.Enum):
+    MOVE: str = "move"
+    ROLL: str = "roll"
+
+
 payload_schema: Dict[str, Any] = {
     "type": "object",
-    "properties": {"opcode": {"type": "integer"}, "data": {"type": "object"}},
+    "properties": {
+        "opcode": {"type": "string", "enum": [e.value for e in Opcode],},
+        "move": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 8,
+            "items": {"type": "integer"},
+        },
+    },
     "required": ["opcode"],
 }
 
 
-class Opcode(enum.Enum):
-    STUB: int = 1
-
-
-async def process_payload(serialized_payload: Union[str, bytes]) -> str:
+async def process_payload(
+    game_id: uuid.UUID, session_id: str, serialized_payload: Union[str, bytes]
+) -> str:
     def deserialize(serialized_payload: Union[str, bytes]) -> Dict[str, Any]:
         try:
             return json.loads(serialized_payload)
@@ -46,9 +65,40 @@ async def process_payload(serialized_payload: Union[str, bytes]) -> str:
             logger.warning(error)
             raise ValueError("Invalid payload")
 
-    def evaluate(deserialized_payload: Dict[str, Any]) -> str:
-        return "stub"
+    async def evaluate(deserialized_payload: Dict[str, Any]) -> str:
+        async with redis.get_connection() as conn:
+            state: Dict[str, str] = await conn.hgetall(
+                f"game:{game_id}", encoding="utf-8"
+            )
+        game: backgammon.Backgammon = backgammon.Backgammon(
+            state["position"], state["match"]
+        )
+
+        if state[f"player_{game.match.player.value}"] != session_id:
+            raise ValueError(
+                f"Invalid player: {session_id} expecting {state[f'player_{game.match.player.value}']}"
+            )
+
+        if Opcode(deserialized_payload["opcode"]) is Opcode.MOVE:
+            try:
+                game.play(
+                    tuple(
+                        tuple(deserialized_payload["move"][i : i + 2])
+                        for i in range(0, len(deserialized_payload["move"]), 2)
+                    )
+                )
+                game.end_turn()
+                game.roll()
+            except backgammon.backgammon.BackgammonError:
+                raise ValueError(f"Invalid move: {deserialized_payload['move']}")
+
+        async with redis.get_connection() as conn:
+            pipeline: aioredis.commands.transaction.MultiExec = conn.multi_exec()
+            pipeline.hset(f"game:{game_id}", "position", game.position.encode())
+            pipeline.hset(f"game:{game_id}", "match", game.match.encode())
+            await pipeline.execute()
+        return game.to_json()
 
     deserialized_payload: Dict[str, Any] = deserialize(serialized_payload)
     validate(deserialized_payload)
-    return evaluate(deserialized_payload)
+    return await evaluate(deserialized_payload)

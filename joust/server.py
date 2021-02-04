@@ -21,6 +21,7 @@ import types
 from typing import Dict, Optional, Set, Type
 import os
 
+import backgammon
 import websockets
 
 from . import channels
@@ -68,7 +69,9 @@ class Server:
         self._shutdown = asyncio.get_running_loop().create_future()
         try:
             for s in [signal.SIGINT, signal.SIGTERM]:
-                asyncio.get_running_loop().add_signal_handler(s, self._shutdown.set_result, None)
+                asyncio.get_running_loop().add_signal_handler(
+                    s, self._shutdown.set_result, None
+                )
         except NotImplementedError:
             logger.warning("loop.add_signal_handler not supported, using workaround")
             self._signal_workaround()
@@ -114,10 +117,20 @@ class Server:
 
     async def _handler(self, websocket: protocol.ServerProtocol, path: str):
         logger.info(f"{websocket.remote_address} - {websocket.game_id} [opened]")
+        async with redis.get_connection() as conn:
+            state: Dict[str, str] = await conn.hgetall(
+                f"game:{websocket.game_id}", encoding="utf-8"
+            )
+        game: backgammon.Backgammon = backgammon.Backgammon(
+            state["position"], state["match"]
+        )
+        await websocket.send(game.to_json())
         async with channels.get_channel(websocket):
             async for message in websocket:
                 try:
-                    result: str = await subprotocol.process_payload(message)
+                    result: str = await subprotocol.process_payload(
+                        websocket.game_id, websocket.session_id, message
+                    )
                     async with redis.get_connection() as conn:
                         await conn.publish(str(websocket.game_id), result)
                 except ValueError as error:
