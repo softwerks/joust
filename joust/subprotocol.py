@@ -41,7 +41,7 @@ payload_schema: Dict[str, Any] = {
             "type": "array",
             "minItems": 2,
             "maxItems": 8,
-            "items": {"type": "integer"},
+            "items": {"type": ["integer", "null"]},
         },
     },
     "required": ["opcode"],
