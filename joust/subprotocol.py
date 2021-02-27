@@ -30,6 +30,7 @@ logger: logging.Logger = logging.getLogger(__name__)
 @enum.unique
 class Opcode(enum.Enum):
     MOVE: str = "move"
+    SKIP: str = "skip"
     ROLL: str = "roll"
 
 
@@ -79,7 +80,14 @@ async def process_payload(
                 f"Invalid player: {session_id} expecting {state[f'player_{game.match.player.value}']}"
             )
 
-        if Opcode(deserialized_payload["opcode"]) is Opcode.MOVE:
+        opcode: Opcode = Opcode(deserialized_payload["opcode"])
+        if opcode is Opcode.SKIP:
+            try:
+                game.skip()
+                game.roll()
+            except backgammon.backgammon.BackgammonError:
+                raise ValueError("Cannot skip turn")
+        elif opcode is Opcode.MOVE:
             try:
                 game.play(
                     tuple(
