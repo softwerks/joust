@@ -16,7 +16,7 @@ import enum
 import json
 import jsonschema
 import logging
-from typing import Any, Dict, Union
+from typing import Any, Dict, Tuple, Union
 import uuid
 
 import aioredis
@@ -29,6 +29,7 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 @enum.unique
 class Opcode(enum.Enum):
+    JOIN: str = "join"
     MOVE: str = "move"
     SKIP: str = "skip"
     ROLL: str = "roll"
@@ -49,64 +50,98 @@ payload_schema: Dict[str, Any] = {
 }
 
 
+def deserialize(serialized_payload: Union[str, bytes]) -> Dict[str, Any]:
+    try:
+        return json.loads(serialized_payload)
+    except json.JSONDecodeError as error:
+        logger.warning(error)
+        raise ValueError("Payload is not a valid JSON document")
+
+
+def validate(deserialized_payload: Dict[str, Any]) -> None:
+    try:
+        jsonschema.validate(instance=deserialized_payload, schema=payload_schema)
+    except jsonschema.exceptions.ValidationError as error:
+        logger.warning(error)
+        raise ValueError("Invalid payload")
+
+
+async def join(game_id: uuid.UUID, session_id: str) -> None:
+    pass
+
+
+async def load_game(game_id: uuid.UUID) -> Dict[str, str]:
+    async with redis.get_connection() as conn:
+        game: Dict[str, str] = await conn.hgetall(f"game:{game_id}", encoding="utf-8")
+    return game
+
+
+def play(
+    opcode: Opcode, deserialized_payload: Dict[str, Any], bg: backgammon.Backgammon
+) -> None:
+    def skip() -> None:
+        try:
+            bg.skip()
+            bg.roll()
+        except backgammon.backgammon.BackgammonError:
+            raise ValueError("Cannot skip turn")
+
+    def move() -> None:
+        try:
+            bg.play(
+                tuple(
+                    tuple(deserialized_payload["move"][i : i + 2])
+                    for i in range(0, len(deserialized_payload["move"]), 2)
+                )
+            )
+            bg.end_turn()
+            bg.roll()
+        except backgammon.backgammon.BackgammonError:
+            raise ValueError(f"Invalid move: {deserialized_payload['move']}")
+
+    if opcode is Opcode.SKIP:
+        skip()
+    elif opcode is Opcode.MOVE:
+        move()
+
+
+async def update_game(game_id: uuid.UUID, bg: backgammon.Backgammon) -> None:
+    async with redis.get_connection() as conn:
+        pipeline: aioredis.commands.transaction.MultiExec = conn.multi_exec()
+        pipeline.hset(f"game:{game_id}", "position", bg.position.encode())
+        pipeline.hset(f"game:{game_id}", "match", bg.match.encode())
+        await pipeline.execute()
+
+
+async def evaluate(
+    game_id: uuid.UUID, session_id: str, deserialized_payload: Dict[str, Any]
+) -> Tuple[bool, str]:
+    publish: bool
+
+    game: Dict[str, str] = await load_game(game_id)
+    bg: backgammon.Backgammon = backgammon.Backgammon(game["position"], game["match"])
+
+    opcode: Opcode = Opcode(deserialized_payload["opcode"])
+    if opcode is Opcode.JOIN:
+        await join(game_id, session_id)
+        publish = False
+    elif bg.match.game_state is backgammon.match.GameState.PLAYING:
+        turn: int = game[f"player_{game.match.player.value}"]
+        if turn == session_id:
+            play(opcode, deserialized_payload, bg)
+            await update_game(game_id, bg)
+            publish = True
+        else:
+            raise ValueError(f"Invalid player: {session_id} expecting {turn}")
+    else:
+        raise ValueError(f"Game isn't active: {game_id}")
+
+    return publish, bg.to_json()
+
+
 async def process_payload(
     game_id: uuid.UUID, session_id: str, serialized_payload: Union[str, bytes]
-) -> str:
-    def deserialize(serialized_payload: Union[str, bytes]) -> Dict[str, Any]:
-        try:
-            return json.loads(serialized_payload)
-        except json.JSONDecodeError as error:
-            logger.warning(error)
-            raise ValueError("Payload is not a valid JSON document")
-
-    def validate(deserialized_payload: Dict[str, Any]) -> None:
-        try:
-            jsonschema.validate(instance=deserialized_payload, schema=payload_schema)
-        except jsonschema.exceptions.ValidationError as error:
-            logger.warning(error)
-            raise ValueError("Invalid payload")
-
-    async def evaluate(deserialized_payload: Dict[str, Any]) -> str:
-        async with redis.get_connection() as conn:
-            state: Dict[str, str] = await conn.hgetall(
-                f"game:{game_id}", encoding="utf-8"
-            )
-        game: backgammon.Backgammon = backgammon.Backgammon(
-            state["position"], state["match"]
-        )
-
-        if state[f"player_{game.match.player.value}"] != session_id:
-            raise ValueError(
-                f"Invalid player: {session_id} expecting {state[f'player_{game.match.player.value}']}"
-            )
-
-        opcode: Opcode = Opcode(deserialized_payload["opcode"])
-        if opcode is Opcode.SKIP:
-            try:
-                game.skip()
-                game.roll()
-            except backgammon.backgammon.BackgammonError:
-                raise ValueError("Cannot skip turn")
-        elif opcode is Opcode.MOVE:
-            try:
-                game.play(
-                    tuple(
-                        tuple(deserialized_payload["move"][i : i + 2])
-                        for i in range(0, len(deserialized_payload["move"]), 2)
-                    )
-                )
-                game.end_turn()
-                game.roll()
-            except backgammon.backgammon.BackgammonError:
-                raise ValueError(f"Invalid move: {deserialized_payload['move']}")
-
-        async with redis.get_connection() as conn:
-            pipeline: aioredis.commands.transaction.MultiExec = conn.multi_exec()
-            pipeline.hset(f"game:{game_id}", "position", game.position.encode())
-            pipeline.hset(f"game:{game_id}", "match", game.match.encode())
-            await pipeline.execute()
-        return game.to_json()
-
+) -> Tuple[bool, str]:
     deserialized_payload: Dict[str, Any] = deserialize(serialized_payload)
     validate(deserialized_payload)
-    return await evaluate(deserialized_payload)
+    return await evaluate(game_id, session_id, deserialized_payload)

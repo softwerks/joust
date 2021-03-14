@@ -116,23 +116,21 @@ class Server:
         logger.info("Server stopped")
 
     async def _handler(self, websocket: protocol.ServerProtocol, path: str):
+        publish: bool
+        msg: str
+
         logger.info(f"{websocket.remote_address} - {websocket.game_id} [opened]")
-        async with redis.get_connection() as conn:
-            state: Dict[str, str] = await conn.hgetall(
-                f"game:{websocket.game_id}", encoding="utf-8"
-            )
-        game: backgammon.Backgammon = backgammon.Backgammon(
-            state["position"], state["match"]
-        )
-        await websocket.send(game.to_json())
         async with channels.get_channel(websocket):
             async for message in websocket:
                 try:
-                    result: str = await subprotocol.process_payload(
+                    publish, msg = await subprotocol.process_payload(
                         websocket.game_id, websocket.session_id, message
                     )
-                    async with redis.get_connection() as conn:
-                        await conn.publish(str(websocket.game_id), result)
+                    if publish:
+                        async with redis.get_connection() as conn:
+                            await conn.publish(str(websocket.game_id), msg)
+                    else:
+                        await websocket.send(msg)
                 except ValueError as error:
                     logger.warning(
                         f"{websocket.remote_address} - {websocket.game_id} [error]: {error}"
