@@ -23,6 +23,7 @@ import aioredis
 import backgammon
 
 from . import redis
+from . import session
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -66,14 +67,25 @@ def validate(deserialized_payload: Dict[str, Any]) -> None:
         raise ValueError("Invalid payload")
 
 
-async def join(game_id: uuid.UUID, session_id: str) -> None:
-    pass
-
-
 async def load_game(game_id: uuid.UUID) -> Dict[str, str]:
     async with redis.get_connection() as conn:
         game: Dict[str, str] = await conn.hgetall(f"game:{game_id}", encoding="utf-8")
     return game
+
+
+async def join(
+    game_id: uuid.UUID, session_id: str, game: Dict[str, str], bg: backgammon.Backgammon
+) -> bool:
+    start_game: bool = False
+
+    if bg.match.game_state is backgammon.match.GameState.NOT_STARTED:
+        async with session.load(session_id) as s:
+            if s.game_id is None:
+                player: int = 0 if "player_0" not in game else 1
+                joined: bool = await s.join_game(game_id, player)
+                start_game = True if player == 1 and joined else False
+
+    return start_game
 
 
 def play(
@@ -116,17 +128,21 @@ async def update_game(game_id: uuid.UUID, bg: backgammon.Backgammon) -> None:
 async def evaluate(
     game_id: uuid.UUID, session_id: str, deserialized_payload: Dict[str, Any]
 ) -> Tuple[bool, str]:
-    publish: bool
+    publish: bool = False
 
     game: Dict[str, str] = await load_game(game_id)
     bg: backgammon.Backgammon = backgammon.Backgammon(game["position"], game["match"])
 
     opcode: Opcode = Opcode(deserialized_payload["opcode"])
     if opcode is Opcode.JOIN:
-        await join(game_id, session_id)
-        publish = False
+        start_game = await join(game_id, session_id, game, bg)
+        if start_game:
+            bg.match.game_state = backgammon.match.GameState.PLAYING
+            bg.first_roll()
+            await update_game(game_id, bg)
+            publish = True
     elif bg.match.game_state is backgammon.match.GameState.PLAYING:
-        turn: int = game[f"player_{game.match.player.value}"]
+        turn: str = game[f"player_{bg.match.player.value}"]
         if turn == session_id:
             play(opcode, deserialized_payload, bg)
             await update_game(game_id, bg)
