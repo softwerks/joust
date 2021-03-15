@@ -28,7 +28,7 @@ logger: logging.Logger = logging.getLogger(__name__)
 class ServerProtocol(websockets.WebSocketServerProtocol):
     game_id: uuid.UUID
     token: str
-    session_id: Optional[str]
+    session_id: str
 
     async def process_request(
         self, path: str, request_headers: websockets.http.Headers
@@ -53,15 +53,16 @@ class ServerProtocol(websockets.WebSocketServerProtocol):
             )
 
         async with redis.get_connection() as conn:
-            self.session_id = await conn.get(
-                "websocket:" + self.token, encoding="utf-8"
+            session_id: Optional[str] = await conn.get(
+                f"websocket:{self.token}", encoding="utf-8"
             )
-        if self.session_id is None:
+        if session_id is None:
             logger.info(f"Invalid token: {self.token}")
             return (
                 http.HTTPStatus.UNAUTHORIZED,
                 [("WWW-Authenticate", "Token")],
                 b"Invalid credentials\n",
             )
+        self.session_id = session_id
 
         return await super().process_request(path, request_headers)
