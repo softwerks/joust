@@ -16,7 +16,7 @@ import enum
 import json
 import jsonschema
 import logging
-from typing import Any, Dict, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 import uuid
 
 import aioredis
@@ -33,7 +33,13 @@ class Opcode(enum.Enum):
     JOIN: str = "join"
     MOVE: str = "move"
     SKIP: str = "skip"
+    READY: str = "ready"
     ROLL: str = "roll"
+
+
+@enum.unique
+class Status(enum.Enum):
+    READY: str = "ready"
 
 
 payload_schema: Dict[str, Any] = {
@@ -46,6 +52,7 @@ payload_schema: Dict[str, Any] = {
             "maxItems": 8,
             "items": {"type": ["integer", "null"]},
         },
+        "player": {"type": "integer", "minimum": 0, "maximum": 1},
     },
     "required": ["opcode"],
 }
@@ -75,17 +82,57 @@ async def load_game(game_id: uuid.UUID) -> Dict[str, str]:
 
 async def join(
     game_id: uuid.UUID, session_id: str, game: Dict[str, str], bg: backgammon.Backgammon
+) -> Optional[int]:
+    async with session.load(session_id) as s:
+        if bg.match.game_state is backgammon.match.GameState.NOT_STARTED:
+            if s.game_id is None:
+                player: int = 0 if "player_0" not in game else 1
+                if await s.join_game(game_id, player):
+                    return player
+        elif uuid.UUID(s.game_id) == game_id:
+            player_id: str = s.user_id if s.user_id else session_id
+            if game.get("player_0") == player_id:
+                return 0
+            elif game.get("player_1") == player_id:
+                return 1
+
+    return None
+
+
+async def start(
+    game_id: uuid.UUID,
+    session_id: str,
+    player: int,
+    game: Dict[str, str],
+    bg: backgammon.Backgammon,
 ) -> bool:
-    start_game: bool = False
+    started: bool = False
 
     if bg.match.game_state is backgammon.match.GameState.NOT_STARTED:
         async with session.load(session_id) as s:
-            if s.game_id is None:
-                player: int = 0 if "player_0" not in game else 1
-                joined: bool = await s.join_game(game_id, player)
-                start_game = True if player == 1 and joined else False
+            authorized: bool = False
 
-    return start_game
+            authorized_player: Optional[str] = game.get(f"player_{player}")
+            if s.authenticated and authorized_player == s.user_id:
+                authorized = True
+            elif authorized_player == s.session_id:
+                authorized = True
+
+            if authorized:
+                async with redis.get_connection() as conn:
+                    pipeline: aioredis.commands.transaction.MultiExec = conn.multi_exec()
+                    pipeline.hset(
+                        f"game:{game_id}", f"status_{player}", f"{Status.READY.value}"
+                    )
+                    opponent: int = 0 if player == 1 else 1
+                    pipeline.hget(f"game:{game_id}", f"status_{opponent}", encoding="utf-8")
+                    _, opponent_status = await pipeline.execute()
+                    if opponent_status and Status(opponent_status) is Status.READY:
+                        bg.match.game_state = backgammon.match.GameState.PLAYING
+                        bg.first_roll()
+                        started = True
+
+    return started
 
 
 def play(
@@ -128,19 +175,27 @@ async def update_game(game_id: uuid.UUID, bg: backgammon.Backgammon) -> None:
 async def evaluate(
     game_id: uuid.UUID, session_id: str, deserialized_payload: Dict[str, Any]
 ) -> Tuple[bool, str]:
+    bg: backgammon.Backgammon
+    game: Dict[str, str]
+    msg: Dict[str, Any] = {}
+    opcode: Opcode
     publish: bool = False
 
-    game: Dict[str, str] = await load_game(game_id)
-    bg: backgammon.Backgammon = backgammon.Backgammon(game["position"], game["match"])
+    game = await load_game(game_id)
+    bg = backgammon.Backgammon(game["position"], game["match"])
 
-    opcode: Opcode = Opcode(deserialized_payload["opcode"])
+    opcode = Opcode(deserialized_payload["opcode"])
     if opcode is Opcode.JOIN:
-        start_game = await join(game_id, session_id, game, bg)
-        if start_game:
-            bg.match.game_state = backgammon.match.GameState.PLAYING
-            bg.first_roll()
-            await update_game(game_id, bg)
-            publish = True
+        msg["player"] = await join(game_id, session_id, game, bg)
+    elif opcode is Opcode.READY:
+        player: Optional[int] = deserialized_payload.get("player")
+        if player is not None:
+            started: bool = await start(game_id, session_id, player, game, bg)
+            if started:
+                await update_game(game_id, bg)
+                publish = True
+        else:
+            raise ValueError("Missing player ID")
     elif bg.match.game_state is backgammon.match.GameState.PLAYING:
         turn: str = game[f"player_{bg.match.player.value}"]
         if turn == session_id:
@@ -152,7 +207,9 @@ async def evaluate(
     else:
         raise ValueError(f"Game isn't active: {game_id}")
 
-    return publish, bg.to_json()
+    msg["game"] = bg.to_json()
+
+    return publish, json.dumps(msg)
 
 
 async def process_payload(
