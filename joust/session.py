@@ -55,21 +55,21 @@ class Session:
         async with redis.get_connection() as conn:
             if self.authenticated:
                 if self.user_id is not None:
-                    result = conn.hsetnx(
+                    result = await conn.hsetnx(
                         f"game:{game_id}", f"player_{player}", self.user_id
                     )
                     if result:
-                        conn.hset("games", self.user_id, str(game_id))
+                        await conn.hset("games", self.user_id, str(game_id))
                 else:
                     logger.error(
                         f"Authenticated session missing user_id: {self.session_id}"
                     )
             else:
-                result = conn.hsetnx(
+                result = await conn.hsetnx(
                     f"game:{game_id}", f"player_{player}", self.session_id
                 )
                 if result:
-                    conn.hset(f"session:{self.session_id}", "game_id", str(game_id))
+                    await conn.hset(f"session:{self.session_id}", "game_id", str(game_id))
 
         return result
 
