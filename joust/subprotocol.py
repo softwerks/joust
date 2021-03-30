@@ -138,12 +138,17 @@ async def start(
 def play(
     opcode: Opcode, deserialized_payload: Dict[str, Any], bg: backgammon.Backgammon
 ) -> None:
+    def roll() -> None:
+        try:
+            bg.roll()
+        except backgammon.backgammon.BackgammonError as error:
+            raise ValueError(error)
+
     def skip() -> None:
         try:
             bg.skip()
-            bg.roll()
-        except backgammon.backgammon.BackgammonError:
-            raise ValueError("Cannot skip turn")
+        except backgammon.backgammon.BackgammonError as error:
+            raise ValueError(error)
 
     def move() -> None:
         try:
@@ -154,11 +159,12 @@ def play(
                 )
             )
             bg.end_turn()
-            bg.roll()
-        except backgammon.backgammon.BackgammonError:
-            raise ValueError(f"Invalid move: {deserialized_payload['move']}")
+        except backgammon.backgammon.BackgammonError as error:
+            raise ValueError(error)
 
-    if opcode is Opcode.SKIP:
+    if opcode is Opcode.ROLL:
+        roll()
+    elif opcode is Opcode.SKIP:
         skip()
     elif opcode is Opcode.MOVE:
         move()
