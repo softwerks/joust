@@ -89,7 +89,7 @@ async def join(
                 player: int = 0 if "player_0" not in game else 1
                 if await s.join_game(game_id, player):
                     return player
-        elif uuid.UUID(s.game_id) == game_id:
+        elif s.game_id is not None and uuid.UUID(s.game_id) == game_id:
             player_id: str = s.user_id if s.user_id else session_id
             if game.get("player_0") == player_id:
                 return 0
