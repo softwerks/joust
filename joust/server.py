@@ -18,7 +18,7 @@ import logging
 import signal
 import socket
 import types
-from typing import Dict, Optional, Set, Type
+from typing import List, Optional, Tuple, Type
 import os
 
 import backgammon
@@ -120,21 +120,27 @@ class Server:
         msg: str
 
         logger.info(f"{websocket.remote_address} - {websocket.game_id} [opened]")
+
         async with channels.get_channel(websocket):
             async for message in websocket:
                 try:
-                    publish, msg = await subprotocol.process_payload(
+                    responses: List[
+                        Tuple[bool, str]
+                    ] = await subprotocol.process_payload(
                         websocket.game_id, websocket.session_id, message
                     )
-                    if publish:
-                        async with redis.get_connection() as conn:
-                            await conn.publish(str(websocket.game_id), msg)
-                    else:
-                        await websocket.send(msg)
+                    for resp in responses:
+                        publish, msg = resp
+                        if publish:
+                            async with redis.get_connection() as conn:
+                                await conn.publish(str(websocket.game_id), msg)
+                        else:
+                            await websocket.send(msg)
                 except ValueError as error:
                     logger.warning(
                         f"{websocket.remote_address} - {websocket.game_id} [error]: {error}"
                     )
+
         logger.info(f"{websocket.remote_address} - {websocket.game_id} [closed]")
 
     async def shutdown(self) -> None:

@@ -29,6 +29,7 @@ class Session:
     address: str
     authenticated: bool = dataclasses.field(init=False)
     created: str
+    id_: str = dataclasses.field(init=False)
     last_seen: str
     session_id: str
     session_type: str
@@ -38,55 +39,45 @@ class Session:
     user_id: Optional[str] = None
 
     def __post_init__(self) -> None:
-        self.authenticated = True if self.session_type == "authenticated" else False
+        if self.user_id is not None:
+            self.authenticated = True
+            self.id_ = self.user_id
+        else:
+            self.authenticated = False
+            self.id_ = self.session_id
 
     async def _lookup_game_id(self) -> None:
-        if self.user_id is not None:
-            async with redis.get_connection() as conn:
-                self.game_id = await conn.hget("games", self.user_id)
-        else:
-            raise LookupError(
-                f"Authenticated session missing user_id: {self.session_id}"
-            )
+        async with redis.get_connection() as conn:
+            self.game_id = await conn.hget("games", self.id_)
 
     async def join_game(self, game_id: uuid.UUID, player: int) -> bool:
-        result: bool = False
+        success: bool = False
 
         async with redis.get_connection() as conn:
-            if self.authenticated:
-                if self.user_id is not None:
-                    result = await conn.hsetnx(
-                        f"game:{game_id}", f"player_{player}", self.user_id
-                    )
-                    if result:
-                        await conn.hset("games", self.user_id, str(game_id))
+            success = bool(
+                await conn.hsetnx(f"game:{game_id}", f"player_{player}", self.id_)
+            )
+            if success:
+                if self.authenticated:
+                    await conn.hset("games", self.id_, str(game_id))
                 else:
-                    logger.error(
-                        f"Authenticated session missing user_id: {self.session_id}"
+                    await conn.hset(
+                        f"session:{self.session_id}", "game_id", str(game_id)
                     )
-            else:
-                result = await conn.hsetnx(
-                    f"game:{game_id}", f"player_{player}", self.session_id
-                )
-                if result:
-                    await conn.hset(f"session:{self.session_id}", "game_id", str(game_id))
 
-        return result
+        return success
 
 
 @contextlib.asynccontextmanager
 async def load(session_id: str) -> AsyncGenerator[Session, None]:
-    session_data: Dict[str, str]
-
     async with redis.get_connection() as conn:
-        session_data = await conn.hgetall(f"session:{session_id}", encoding="utf-8")
+        session_data: Dict[str, str] = await conn.hgetall(
+            f"session:{session_id}", encoding="utf-8"
+        )
 
     session: Session = Session(session_id=session_id, **session_data)
 
     if session.authenticated:
-        try:
-            await session._lookup_game_id()
-        except LookupError as error:
-            logger.error(error)
+        await session._lookup_game_id()
 
     yield session
