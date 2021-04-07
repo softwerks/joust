@@ -70,14 +70,22 @@ def _authorized(func: Callable) -> Callable:
 
 payload_schema: Dict[str, Any] = {
     "type": "object",
-    "properties": {"opcode": {"type": "string", "enum": [e.value for e in Opcode],},},
+    "properties": {
+        "opcode": {
+            "type": "string",
+            "enum": [e.value for e in Opcode],
+        },
+    },
     "required": ["opcode"],
 }
 
 payload_schema_move: Dict[str, Any] = {
     "type": "object",
     "properties": {
-        "opcode": {"type": "string", "enum": [e.value for e in Opcode],},
+        "opcode": {
+            "type": "string",
+            "enum": [e.value for e in Opcode],
+        },
         "move": {
             "type": "array",
             "minItems": 2,
