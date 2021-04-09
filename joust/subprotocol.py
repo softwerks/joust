@@ -47,39 +47,7 @@ class ResponseCode(enum.Enum):
     UPDATE: str = "update"
 
 
-def _authorized(func: Callable) -> Callable:
-    @functools.wraps(func)
-    async def wrapper(
-        game_id: uuid.UUID, session_id: str, *args, **kwargs
-    ) -> Union[Callable, ResponseType]:
-        publish: bool = False
-
-        async with session.load(session_id) as s:
-            if s.game_id == str(game_id):
-                game: Dict[str, str] = await _load_game(game_id)
-                bg: backgammon.Backgammon = _decode_game(game)
-
-                logger.info(bg.match.turn.value)
-                if s.id_ == game.get(f"player_{bg.match.turn.value}"):
-                    return await func(game_id, session_id, s, game, bg, *args, **kwargs)
-
-        return publish, {"code": ResponseCode.ERROR.value, "error": "Unauthorized"}
-
-    return wrapper
-
-
 payload_schema: Dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "opcode": {
-            "type": "string",
-            "enum": [e.value for e in Opcode],
-        },
-    },
-    "required": ["opcode"],
-}
-
-payload_schema_move: Dict[str, Any] = {
     "type": "object",
     "properties": {
         "opcode": {
@@ -93,8 +61,28 @@ payload_schema_move: Dict[str, Any] = {
             "items": {"type": ["integer", "null"]},
         },
     },
-    "required": ["opcode", "move"],
+    "required": ["opcode"],
 }
+
+
+def _authorized(func: Callable) -> Callable:
+    @functools.wraps(func)
+    async def wrapper(
+        game_id: uuid.UUID, session_id: str, *args, **kwargs
+    ) -> Union[Callable, ResponseType]:
+        publish: bool = False
+
+        async with session.load(session_id) as s:
+            if s.game_id == str(game_id):
+                game: Dict[str, str] = await _load_game(game_id)
+                bg: backgammon.Backgammon = _decode_game(game)
+
+                if s.id_ == game.get(f"player_{bg.match.turn.value}"):
+                    return await func(game_id, session_id, s, game, bg, *args, **kwargs)
+
+        return publish, {"code": ResponseCode.ERROR.value, "error": "Unauthorized"}
+
+    return wrapper
 
 
 async def process_payload(
@@ -118,8 +106,6 @@ def _validate(payload: PayloadType) -> None:
     """Validate the payload."""
     try:
         jsonschema.validate(instance=payload, schema=payload_schema)
-        if Opcode(payload["opcode"]) is Opcode.MOVE:
-            jsonschema.validate(instance=payload, schema=payload_schema_move)
     except jsonschema.exceptions.ValidationError as error:
         raise ValueError(error)
 
@@ -135,7 +121,10 @@ async def _evaluate(
     if opcode is Opcode.JOIN:
         responses.extend(await _join(game_id, session_id))
     elif opcode is Opcode.MOVE:
-        responses.append(await _move(game_id, session_id, payload["move"]))
+        try:
+            responses.append(await _move(game_id, session_id, payload["move"]))
+        except KeyError:
+            raise ValueError("Missing move")
     elif opcode is Opcode.ROLL:
         responses.append(await _roll(game_id, session_id))
     elif opcode is Opcode.SKIP:
