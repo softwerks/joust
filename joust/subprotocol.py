@@ -163,10 +163,7 @@ async def _join(
         False,
         {"code": ResponseCode.PLAYER.value, "player": player},
     )
-    update_resp: ResponseType = (
-        publish_update,
-        {"code": ResponseCode.UPDATE.value, "game": bg.to_json()},
-    )
+    update_resp: ResponseType = await _update(game_id, bg)
 
     return player_resp, update_resp
 
@@ -249,4 +246,4 @@ async def _update(game_id: uuid.UUID, bg: backgammon.Backgammon) -> ResponseType
         pipeline.hset(f"game:{game_id}", "match", bg.match.encode())
         await pipeline.execute()
 
-    return publish, {"code": ResponseCode.UPDATE.value, "game": bg.to_json()}
+    return publish, {"code": ResponseCode.UPDATE.value, "id": bg.encode()}
