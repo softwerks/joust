@@ -34,6 +34,8 @@ ResponseType = Tuple[bool, PayloadType]
 
 @enum.unique
 class Opcode(enum.Enum):
+    ACCEPT: str = "accept"
+    DOUBLE: str = "double"
     JOIN: str = "join"
     MOVE: str = "move"
     ROLL: str = "roll"
@@ -118,7 +120,11 @@ async def _evaluate(
 
     opcode: Opcode = Opcode(payload["opcode"])
 
-    if opcode is Opcode.JOIN:
+    if opcode is Opcode.ACCEPT:
+        responses.append(await _accept(game_id, session_id))
+    elif opcode is Opcode.DOUBLE:
+        responses.append(await _double(game_id, session_id))
+    elif opcode is Opcode.JOIN:
         responses.extend(await _join(game_id, session_id))
     elif opcode is Opcode.MOVE:
         try:
@@ -131,6 +137,38 @@ async def _evaluate(
         responses.append(await _skip(game_id, session_id))
 
     return [(publish, json.dumps(msg)) for publish, msg in responses]
+
+
+@_authorized
+async def _accept(
+    game_id: uuid.UUID,
+    session_id: str,
+    s: session.Session,
+    game: Dict[str, str],
+    bg: backgammon.Backgammon,
+) -> ResponseType:
+    """Double and return an update response."""
+    try:
+        bg.accept_double()
+        return await _update(game_id, bg)
+    except backgammon.backgammon.BackgammonError as error:
+        raise ValueError(error)
+
+
+@_authorized
+async def _double(
+    game_id: uuid.UUID,
+    session_id: str,
+    s: session.Session,
+    game: Dict[str, str],
+    bg: backgammon.Backgammon,
+) -> ResponseType:
+    """Double and return an update response."""
+    try:
+        bg.double()
+        return await _update(game_id, bg)
+    except backgammon.backgammon.BackgammonError as error:
+        raise ValueError(error)
 
 
 async def _join(
