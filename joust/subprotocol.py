@@ -38,6 +38,7 @@ class Opcode(enum.Enum):
     DOUBLE: str = "double"
     JOIN: str = "join"
     MOVE: str = "move"
+    REJECT: str = "reject"
     ROLL: str = "roll"
     SKIP: str = "skip"
 
@@ -131,6 +132,8 @@ async def _evaluate(
             responses.append(await _move(game_id, session_id, payload["move"]))
         except KeyError:
             raise ValueError("Missing move")
+    elif opcode is Opcode.REJECT:
+        responses.append(await _reject(game_id, session_id))
     elif opcode is Opcode.ROLL:
         responses.append(await _roll(game_id, session_id))
     elif opcode is Opcode.SKIP:
@@ -219,6 +222,22 @@ async def _move(
     try:
         bg.play(tuple(tuple(move[i : i + 2]) for i in range(0, len(move), 2)))
         bg.end_turn()
+        return await _update(game_id, bg)
+    except backgammon.backgammon.BackgammonError as error:
+        raise ValueError(error)
+
+
+@_authorized
+async def _reject(
+    game_id: uuid.UUID,
+    session_id: str,
+    s: session.Session,
+    game: Dict[str, str],
+    bg: backgammon.Backgammon,
+) -> ResponseType:
+    """Double and return an update response."""
+    try:
+        bg.reject_double()
         return await _update(game_id, bg)
     except backgammon.backgammon.BackgammonError as error:
         raise ValueError(error)
