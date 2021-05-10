@@ -36,6 +36,7 @@ ResponseType = Tuple[bool, PayloadType]
 class Opcode(enum.Enum):
     ACCEPT: str = "accept"
     DOUBLE: str = "double"
+    EXIT: str = "exit"
     JOIN: str = "join"
     MOVE: str = "move"
     REJECT: str = "reject"
@@ -45,6 +46,7 @@ class Opcode(enum.Enum):
 
 @enum.unique
 class ResponseCode(enum.Enum):
+    CLOSE: str = "close"
     ERROR: str = "error"
     PLAYER: str = "player"
     UPDATE: str = "update"
@@ -125,6 +127,8 @@ async def _evaluate(
         responses.append(await _accept(game_id, session_id))
     elif opcode is Opcode.DOUBLE:
         responses.append(await _double(game_id, session_id))
+    elif opcode is Opcode.EXIT:
+        responses.append(await _exit(game_id, session_id))
     elif opcode is Opcode.JOIN:
         responses.extend(await _join(game_id, session_id))
     elif opcode is Opcode.MOVE:
@@ -172,6 +176,25 @@ async def _double(
         return await _update(game_id, bg)
     except backgammon.backgammon.BackgammonError as error:
         raise ValueError(error)
+
+
+async def _exit(game_id: uuid.UUID, session_id: str) -> ResponseType:
+    """Leave the game and return a response."""
+    game: Dict[str, str] = await _load_game(game_id)
+
+    async with session.load(session_id) as s:
+        player: Optional[int] = None
+        if s.id_ == game.get("player_0"):
+            player = 0
+        elif s.id_ == game.get("player_1"):
+            player = 1
+
+        if player is not None:
+            if game.get(f"player_{0 if player == 1 else 1}") is None:
+                await _delete_game(game_id)
+            await s.leave_game(game_id)
+
+    return False, {"code": ResponseCode.CLOSE.value}
 
 
 async def _join(
@@ -291,6 +314,11 @@ async def _load_game(game_id: uuid.UUID) -> Dict[str, str]:
 def _decode_game(game: Dict[str, str]) -> backgammon.Backgammon:
     """Decode the position and match IDs and return a Backgammon instance."""
     return backgammon.Backgammon(game["position"], game["match"])
+
+
+async def _delete_game(game_id: uuid.UUID) -> None:
+    async with redis.get_connection() as conn:
+        await conn.delete(f"game:{game_id}")
 
 
 async def _update(game_id: uuid.UUID, bg: backgammon.Backgammon) -> ResponseType:

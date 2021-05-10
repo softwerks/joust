@@ -67,6 +67,15 @@ class Session:
 
         return success
 
+    async def leave_game(self, game_id: uuid.UUID) -> None:
+        if uuid.UUID(self.game_id) == game_id:
+            async with redis.get_connection() as conn:
+                if self.authenticated:
+                    await conn.hdel("games", self.id_)
+                else:
+                    await conn.hdel(f"session:{self.session_id}", "game_id")
+            self.game_id = None
+
 
 @contextlib.asynccontextmanager
 async def load(session_id: str) -> AsyncGenerator[Session, None]:
