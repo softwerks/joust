@@ -17,7 +17,6 @@ import contextlib
 import dataclasses
 import logging
 from typing import AsyncGenerator, Dict, Optional
-import uuid
 
 from . import redis
 
@@ -50,7 +49,7 @@ class Session:
         async with redis.get_connection() as conn:
             self.game_id = await conn.hget("games", self.id_)
 
-    async def join_game(self, game_id: uuid.UUID, player: int) -> bool:
+    async def join_game(self, game_id: str, player: int) -> bool:
         success: bool = False
 
         async with redis.get_connection() as conn:
@@ -67,8 +66,8 @@ class Session:
 
         return success
 
-    async def leave_game(self, game_id: uuid.UUID) -> None:
-        if uuid.UUID(self.game_id) == game_id:
+    async def leave_game(self, game_id: str) -> None:
+        if self.game_id == game_id:
             async with redis.get_connection() as conn:
                 if self.authenticated:
                     await conn.hdel("games", self.id_)

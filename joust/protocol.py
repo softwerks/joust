@@ -16,7 +16,6 @@ import http
 import logging
 from typing import Optional
 import urllib.parse
-import uuid
 
 import websockets
 
@@ -26,7 +25,7 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 
 class ServerProtocol(websockets.WebSocketServerProtocol):
-    game_id: uuid.UUID
+    game_id: str
     token: str
     session_id: str
 
@@ -37,7 +36,7 @@ class ServerProtocol(websockets.WebSocketServerProtocol):
         query_params: dict = urllib.parse.parse_qs(parsed_url.query)
 
         try:
-            self.game_id = uuid.UUID(parsed_url.path.rsplit("/", 1)[-1])
+            self.game_id = parsed_url.path.rsplit("/", 1)[-1]
         except ValueError:
             logger.info(f"Invalid or missing game ID: {parsed_url.path}")
             return (http.HTTPStatus.BAD_REQUEST, [], b"")

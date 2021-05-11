@@ -18,7 +18,6 @@ import json
 import jsonschema
 import logging
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
-import uuid
 
 import aioredis
 import backgammon
@@ -73,12 +72,12 @@ payload_schema: Dict[str, Any] = {
 def _authorized(func: Callable) -> Callable:
     @functools.wraps(func)
     async def wrapper(
-        game_id: uuid.UUID, session_id: str, *args, **kwargs
+        game_id: str, session_id: str, *args, **kwargs
     ) -> Union[Callable, ResponseType]:
         publish: bool = False
 
         async with session.load(session_id) as s:
-            if s.game_id == str(game_id):
+            if s.game_id == game_id:
                 game: Dict[str, str] = await _load_game(game_id)
                 bg: backgammon.Backgammon = _decode_game(game)
 
@@ -91,7 +90,7 @@ def _authorized(func: Callable) -> Callable:
 
 
 async def process_payload(
-    game_id: uuid.UUID, session_id: str, serialized_payload: Union[str, bytes]
+    game_id: str, session_id: str, serialized_payload: Union[str, bytes]
 ) -> List[Tuple[bool, str]]:
     """Process the payload and return a list of responses."""
     payload: PayloadType = _deserialize(serialized_payload)
@@ -116,7 +115,7 @@ def _validate(payload: PayloadType) -> None:
 
 
 async def _evaluate(
-    game_id: uuid.UUID, session_id: str, payload: PayloadType
+    game_id: str, session_id: str, payload: PayloadType
 ) -> List[Tuple[bool, str]]:
     """Evalualuate the payload and return a list of JSON responses."""
     responses: List[ResponseType] = []
@@ -148,7 +147,7 @@ async def _evaluate(
 
 @_authorized
 async def _accept(
-    game_id: uuid.UUID,
+    game_id: str,
     session_id: str,
     s: session.Session,
     game: Dict[str, str],
@@ -164,7 +163,7 @@ async def _accept(
 
 @_authorized
 async def _double(
-    game_id: uuid.UUID,
+    game_id: str,
     session_id: str,
     s: session.Session,
     game: Dict[str, str],
@@ -178,7 +177,7 @@ async def _double(
         raise ValueError(error)
 
 
-async def _exit(game_id: uuid.UUID, session_id: str) -> ResponseType:
+async def _exit(game_id: str, session_id: str) -> ResponseType:
     """Leave the game and return a response."""
     game: Dict[str, str] = await _load_game(game_id)
 
@@ -197,9 +196,7 @@ async def _exit(game_id: uuid.UUID, session_id: str) -> ResponseType:
     return False, {"code": ResponseCode.CLOSE.value}
 
 
-async def _join(
-    game_id: uuid.UUID, session_id: str
-) -> Tuple[ResponseType, ResponseType]:
+async def _join(game_id: str, session_id: str) -> Tuple[ResponseType, ResponseType]:
     """Join an open game, start a full game, and return player and update responses."""
     player: Optional[int] = None
     publish_update: bool = False
@@ -234,7 +231,7 @@ async def _join(
 
 @_authorized
 async def _move(
-    game_id: uuid.UUID,
+    game_id: str,
     session_id: str,
     s: session.Session,
     game: Dict[str, str],
@@ -252,7 +249,7 @@ async def _move(
 
 @_authorized
 async def _reject(
-    game_id: uuid.UUID,
+    game_id: str,
     session_id: str,
     s: session.Session,
     game: Dict[str, str],
@@ -268,7 +265,7 @@ async def _reject(
 
 @_authorized
 async def _roll(
-    game_id: uuid.UUID,
+    game_id: str,
     session_id: str,
     s: session.Session,
     game: Dict[str, str],
@@ -284,7 +281,7 @@ async def _roll(
 
 @_authorized
 async def _skip(
-    game_id: uuid.UUID,
+    game_id: str,
     session_id: str,
     s: session.Session,
     game: Dict[str, str],
@@ -298,7 +295,7 @@ async def _skip(
         raise ValueError(error)
 
 
-async def _load_game(game_id: uuid.UUID) -> Dict[str, str]:
+async def _load_game(game_id: str) -> Dict[str, str]:
     """Load and return the game."""
     game: Dict[str, str]
 
@@ -316,12 +313,12 @@ def _decode_game(game: Dict[str, str]) -> backgammon.Backgammon:
     return backgammon.Backgammon(game["position"], game["match"])
 
 
-async def _delete_game(game_id: uuid.UUID) -> None:
+async def _delete_game(game_id: str) -> None:
     async with redis.get_connection() as conn:
         await conn.delete(f"game:{game_id}")
 
 
-async def _update(game_id: uuid.UUID, bg: backgammon.Backgammon) -> ResponseType:
+async def _update(game_id: str, bg: backgammon.Backgammon) -> ResponseType:
     """Update the stored game state and return an update response."""
     publish: bool = True
 
