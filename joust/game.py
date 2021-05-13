@@ -82,10 +82,10 @@ class Game:
         if player is not None:
             async with redis.get_connection() as conn:
                 if player == 0:
-                    await conn.hset(f"game:{self.id_}", "status_0", self.status_0)
+                    await conn.hset(f"game:{self.id_}", "status_0", status.value)
                     self.status_0 = status.value
                 elif player == 1:
-                    await conn.hset(f"game:{self.id_}", "status_1", self.status_1)
+                    await conn.hset(f"game:{self.id_}", "status_1", status.value)
                     self.status_1 = status.value
             status_updated = True
 
