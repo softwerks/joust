@@ -221,7 +221,7 @@ async def _connect(game_id: str, session_id: str) -> Tuple[ResponseType, ...]:
         publish_update,
         {"code": ResponseCode.UPDATE.value, "id": g.state.encode()},
     )
-    responses += update_response
+    responses += (update_response,)
 
     return responses
 
