@@ -30,7 +30,7 @@ class Session:
     created: str
     id_: str = dataclasses.field(init=False)
     last_seen: str
-    session_id: str
+    token: str
     session_type: str
     user_agent: str
     game_id: Optional[str] = None
@@ -43,7 +43,7 @@ class Session:
             self.id_ = self.user_id
         else:
             self.authenticated = False
-            self.id_ = self.session_id
+            self.id_ = self.token
 
     async def _lookup_game_id(self) -> None:
         async with redis.get_connection() as conn:
@@ -54,7 +54,7 @@ class Session:
             if self.authenticated:
                 await conn.hset("games", self.id_, game_id)
             else:
-                await conn.hset(f"session:{self.session_id}", "game_id", game_id)
+                await conn.hset(f"session:{self.token}", "game_id", game_id)
         self.game_id = game_id
 
     async def leave_game(self, game_id: str) -> None:
@@ -63,18 +63,18 @@ class Session:
                 if self.authenticated:
                     await conn.hdel("games", self.id_)
                 else:
-                    await conn.hdel(f"session:{self.session_id}", "game_id")
+                    await conn.hdel(f"session:{self.token}", "game_id")
             self.game_id = None
 
 
 @contextlib.asynccontextmanager
-async def load(session_id: str) -> AsyncGenerator[Session, None]:
+async def load(token: str) -> AsyncGenerator[Session, None]:
     async with redis.get_connection() as conn:
         session_data: Dict[str, str] = await conn.hgetall(
-            f"session:{session_id}", encoding="utf-8"
+            f"session:{token}", encoding="utf-8"
         )
 
-    session: Session = Session(session_id=session_id, **session_data)
+    session: Session = Session(token=token, **session_data)
 
     if session.authenticated:
         await session._lookup_game_id()

@@ -26,8 +26,8 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 class ServerProtocol(websockets.WebSocketServerProtocol):
     game_id: str
-    token: str
-    session_id: str
+    auth_token: str
+    session_token: str
 
     async def process_request(
         self, path: str, request_headers: websockets.http.Headers
@@ -42,7 +42,7 @@ class ServerProtocol(websockets.WebSocketServerProtocol):
             return (http.HTTPStatus.BAD_REQUEST, [], b"")
 
         try:
-            self.token = query_params["token"][0]
+            self.auth_token = query_params["token"][0]
         except KeyError:
             logger.info(f"Missing credentials: {query_params}")
             return (
@@ -52,16 +52,16 @@ class ServerProtocol(websockets.WebSocketServerProtocol):
             )
 
         async with redis.get_connection() as conn:
-            session_id: Optional[str] = await conn.get(
-                f"websocket:{self.token}", encoding="utf-8"
+            session_token: Optional[str] = await conn.get(
+                f"websocket:{self.auth_token}", encoding="utf-8"
             )
-        if session_id is None:
-            logger.info(f"Invalid token: {self.token}")
+        if session_token is None:
+            logger.info(f"Invalid token: {self.auth_token}")
             return (
                 http.HTTPStatus.UNAUTHORIZED,
                 [("WWW-Authenticate", "Token")],
                 b"Invalid credentials\n",
             )
-        self.session_id = session_id
+        self.session_token = session_token
 
         return await super().process_request(path, request_headers)

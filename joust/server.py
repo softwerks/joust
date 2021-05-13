@@ -127,7 +127,7 @@ class Server:
                     responses: List[
                         Tuple[bool, str]
                     ] = await subprotocol.process_payload(
-                        websocket.game_id, websocket.session_id, message
+                        websocket.game_id, websocket.session_token, message
                     )
                     for resp in responses:
                         publish, msg = resp

@@ -75,14 +75,14 @@ payload_schema: Dict[str, Any] = {
 def _authorized(func: Callable) -> Callable:
     @functools.wraps(func)
     async def wrapper(
-        game_id: str, session_id: str, *args, **kwargs
+        game_id: str, session_token: str, *args, **kwargs
     ) -> Union[Callable, ResponseType]:
-        async with session.load(session_id) as s:
+        async with session.load(session_token) as s:
             if s.game_id == game_id:
                 g: game.Game = await game.load(game_id)
 
                 if s.id_ == g.get_turn():
-                    return await func(game_id, session_id, s, g, *args, **kwargs)
+                    return await func(game_id, session_token, s, g, *args, **kwargs)
 
         return False, {"code": ResponseCode.ERROR.value, "error": "Unauthorized"}
 
@@ -90,12 +90,12 @@ def _authorized(func: Callable) -> Callable:
 
 
 async def process_payload(
-    game_id: str, session_id: str, serialized_payload: Union[str, bytes]
+    game_id: str, session_token: str, serialized_payload: Union[str, bytes]
 ) -> List[Tuple[bool, str]]:
     """Process the payload and return a list of responses."""
     payload: PayloadType = _deserialize(serialized_payload)
     _validate(payload)
-    return await _evaluate(game_id, session_id, payload)
+    return await _evaluate(game_id, session_token, payload)
 
 
 def _deserialize(serialized_payload: Union[str, bytes]) -> PayloadType:
@@ -115,7 +115,7 @@ def _validate(payload: PayloadType) -> None:
 
 
 async def _evaluate(
-    game_id: str, session_id: str, payload: PayloadType
+    game_id: str, session_token: str, payload: PayloadType
 ) -> List[Tuple[bool, str]]:
     """Evalualuate the payload and return a list of JSON responses."""
     responses: List[ResponseType] = []
@@ -123,30 +123,30 @@ async def _evaluate(
     opcode: Opcode = Opcode(payload["opcode"])
 
     if opcode is Opcode.ACCEPT:
-        responses.append(await _accept(game_id, session_id))
+        responses.append(await _accept(game_id, session_token))
     elif opcode is Opcode.CONNECT:
-        responses.extend(await _connect(game_id, session_id))
+        responses.extend(await _connect(game_id, session_token))
     elif opcode is Opcode.DISCONNECT:
         disconnect_response: Optional[ResponseType] = await _disconnect(
-            game_id, session_id
+            game_id, session_token
         )
         if disconnect_response is not None:
             responses.append(disconnect_response)
     elif opcode is Opcode.DOUBLE:
-        responses.append(await _double(game_id, session_id))
+        responses.append(await _double(game_id, session_token))
     elif opcode is Opcode.EXIT:
-        responses.extend(await _exit(game_id, session_id))
+        responses.extend(await _exit(game_id, session_token))
     elif opcode is Opcode.MOVE:
         try:
-            responses.append(await _move(game_id, session_id, payload["move"]))
+            responses.append(await _move(game_id, session_token, payload["move"]))
         except KeyError:
             raise ValueError("Missing move")
     elif opcode is Opcode.REJECT:
-        responses.append(await _reject(game_id, session_id))
+        responses.append(await _reject(game_id, session_token))
     elif opcode is Opcode.ROLL:
-        responses.append(await _roll(game_id, session_id))
+        responses.append(await _roll(game_id, session_token))
     elif opcode is Opcode.SKIP:
-        responses.append(await _skip(game_id, session_id))
+        responses.append(await _skip(game_id, session_token))
 
     return [(publish, json.dumps(msg)) for publish, msg in responses]
 
@@ -154,7 +154,7 @@ async def _evaluate(
 @_authorized
 async def _accept(
     game_id: str,
-    session_id: str,
+    session_token: str,
     s: session.Session,
     g: game.Game,
 ) -> ResponseType:
@@ -166,12 +166,12 @@ async def _accept(
         raise ValueError(error)
 
 
-async def _disconnect(game_id: str, session_id: str) -> Optional[ResponseType]:
+async def _disconnect(game_id: str, session_token: str) -> Optional[ResponseType]:
     """Update status and return a response."""
 
     g: game.Game = await game.load(game_id)
 
-    async with session.load(session_id) as s:
+    async with session.load(session_token) as s:
         if await g.set_status(s.id_, game.Status("disconnected")):
             status_response: ResponseType = (
                 True,
@@ -182,7 +182,7 @@ async def _disconnect(game_id: str, session_id: str) -> Optional[ResponseType]:
     return None
 
 
-async def _connect(game_id: str, session_id: str) -> Tuple[ResponseType, ...]:
+async def _connect(game_id: str, session_token: str) -> Tuple[ResponseType, ...]:
     """Join an open game, start a full game, and return responses."""
     player: Optional[int] = None
     responses: Tuple[ResponseType, ...] = ()
@@ -190,7 +190,7 @@ async def _connect(game_id: str, session_id: str) -> Tuple[ResponseType, ...]:
 
     g: game.Game = await game.load(game_id)
 
-    async with session.load(session_id) as s:
+    async with session.load(session_token) as s:
         if s.game_id == game_id:
             player = await g.get_player(s.id_)
         elif (
@@ -229,7 +229,7 @@ async def _connect(game_id: str, session_id: str) -> Tuple[ResponseType, ...]:
 @_authorized
 async def _double(
     game_id: str,
-    session_id: str,
+    session_token: str,
     s: session.Session,
     g: game.Game,
 ) -> ResponseType:
@@ -241,13 +241,13 @@ async def _double(
         raise ValueError(error)
 
 
-async def _exit(game_id: str, session_id: str) -> Tuple[ResponseType, ...]:
+async def _exit(game_id: str, session_token: str) -> Tuple[ResponseType, ...]:
     """Leave the game and return a response."""
     close_reponse: ResponseType = (False, {"code": ResponseCode.CLOSE.value})
 
     g: game.Game = await game.load(game_id)
 
-    async with session.load(session_id) as s:
+    async with session.load(session_token) as s:
         if await g.set_status(s.id_, game.Status("forfeit")):
             await s.leave_game(game_id)
             status_reponse: ResponseType = (
@@ -262,7 +262,7 @@ async def _exit(game_id: str, session_id: str) -> Tuple[ResponseType, ...]:
 @_authorized
 async def _move(
     game_id: str,
-    session_id: str,
+    session_token: str,
     s: session.Session,
     g: game.Game,
     move: List[Optional[int]],
@@ -279,7 +279,7 @@ async def _move(
 @_authorized
 async def _reject(
     game_id: str,
-    session_id: str,
+    session_token: str,
     s: session.Session,
     g: game.Game,
 ) -> ResponseType:
@@ -294,7 +294,7 @@ async def _reject(
 @_authorized
 async def _roll(
     game_id: str,
-    session_id: str,
+    session_token: str,
     s: session.Session,
     g: game.Game,
 ) -> ResponseType:
@@ -309,7 +309,7 @@ async def _roll(
 @_authorized
 async def _skip(
     game_id: str,
-    session_id: str,
+    session_token: str,
     s: session.Session,
     g: game.Game,
 ) -> ResponseType:

@@ -19,7 +19,6 @@ from typing import Dict, Optional
 import backgammon
 
 from . import redis
-from . import session
 
 
 @enum.unique
