@@ -1,4 +1,4 @@
-# Copyright 2020 Softwerks LLC
+# Copyright 2021 Softwerks LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import aioredis
 import backgammon
 
+from . import game
 from . import redis
 from . import session
 
@@ -34,9 +35,10 @@ ResponseType = Tuple[bool, PayloadType]
 @enum.unique
 class Opcode(enum.Enum):
     ACCEPT: str = "accept"
+    CONNECT: str = "connect"
+    DISCONNECT: str = "disconnect"
     DOUBLE: str = "double"
     EXIT: str = "exit"
-    JOIN: str = "join"
     MOVE: str = "move"
     REJECT: str = "reject"
     ROLL: str = "roll"
@@ -48,6 +50,7 @@ class ResponseCode(enum.Enum):
     CLOSE: str = "close"
     ERROR: str = "error"
     PLAYER: str = "player"
+    STATUS: str = "status"
     UPDATE: str = "update"
 
 
@@ -74,17 +77,14 @@ def _authorized(func: Callable) -> Callable:
     async def wrapper(
         game_id: str, session_id: str, *args, **kwargs
     ) -> Union[Callable, ResponseType]:
-        publish: bool = False
-
         async with session.load(session_id) as s:
             if s.game_id == game_id:
-                game: Dict[str, str] = await _load_game(game_id)
-                bg: backgammon.Backgammon = _decode_game(game)
+                g: game.Game = await game.load(game_id)
 
-                if s.id_ == game.get(f"player_{bg.match.turn.value}"):
-                    return await func(game_id, session_id, s, game, bg, *args, **kwargs)
+                if s.id_ == g.get_turn():
+                    return await func(game_id, session_id, s, g, *args, **kwargs)
 
-        return publish, {"code": ResponseCode.ERROR.value, "error": "Unauthorized"}
+        return False, {"code": ResponseCode.ERROR.value, "error": "Unauthorized"}
 
     return wrapper
 
@@ -124,12 +124,18 @@ async def _evaluate(
 
     if opcode is Opcode.ACCEPT:
         responses.append(await _accept(game_id, session_id))
+    elif opcode is Opcode.CONNECT:
+        responses.extend(await _connect(game_id, session_id))
+    elif opcode is Opcode.DISCONNECT:
+        disconnect_response: Optional[ResponseType] = await _disconnect(
+            game_id, session_id
+        )
+        if disconnect_response is not None:
+            responses.append(disconnect_response)
     elif opcode is Opcode.DOUBLE:
         responses.append(await _double(game_id, session_id))
     elif opcode is Opcode.EXIT:
-        responses.append(await _exit(game_id, session_id))
-    elif opcode is Opcode.JOIN:
-        responses.extend(await _join(game_id, session_id))
+        responses.extend(await _exit(game_id, session_id))
     elif opcode is Opcode.MOVE:
         try:
             responses.append(await _move(game_id, session_id, payload["move"]))
@@ -150,15 +156,74 @@ async def _accept(
     game_id: str,
     session_id: str,
     s: session.Session,
-    game: Dict[str, str],
-    bg: backgammon.Backgammon,
+    g: game.Game,
 ) -> ResponseType:
     """Double and return an update response."""
     try:
-        bg.accept_double()
-        return await _update(game_id, bg)
+        g.state.accept_double()
+        return await _update(game_id, g.state)
     except backgammon.backgammon.BackgammonError as error:
         raise ValueError(error)
+
+
+async def _disconnect(game_id: str, session_id: str) -> Optional[ResponseType]:
+    """Update status and return a response."""
+
+    g: game.Game = await game.load(game_id)
+
+    async with session.load(session_id) as s:
+        if await g.set_status(s.id_, game.Status("disconnected")):
+            status_response: ResponseType = (
+                True,
+                {"code": ResponseCode.STATUS.value, "0": g.status_0, "1": g.status_1},
+            )
+            return status_response
+
+    return None
+
+
+async def _connect(game_id: str, session_id: str) -> Tuple[ResponseType, ...]:
+    """Join an open game, start a full game, and return responses."""
+    player: Optional[int] = None
+    responses: Tuple[ResponseType, ...] = ()
+    publish_update: bool = False
+
+    g: game.Game = await game.load(game_id)
+
+    async with session.load(session_id) as s:
+        if s.game_id == game_id:
+            player = await g.get_player(s.id_)
+        elif (
+            s.game_id is None
+            and g.state.match.game_state is backgammon.match.GameState.NOT_STARTED
+        ):
+            player = await g.join_game(s.id_)
+            if player is not None:
+                await s.join_game(game_id)
+            if player == 1:
+                g.state.start()
+                await _update(game_id, g.state)
+                publish_update = True
+
+        if player is not None:
+            await g.set_status(s.id_, game.Status("connected"))
+            player_response: ResponseType = (
+                False,
+                {"code": ResponseCode.PLAYER.value, "player": player},
+            )
+            status_response: ResponseType = (
+                True,
+                {"code": ResponseCode.STATUS.value, "0": g.status_0, "1": g.status_1},
+            )
+            responses += player_response, status_response
+
+    update_response: ResponseType = (
+        publish_update,
+        {"code": ResponseCode.UPDATE.value, "id": g.state.encode()},
+    )
+    responses += update_response
+
+    return responses
 
 
 @_authorized
@@ -166,67 +231,32 @@ async def _double(
     game_id: str,
     session_id: str,
     s: session.Session,
-    game: Dict[str, str],
-    bg: backgammon.Backgammon,
+    g: game.Game,
 ) -> ResponseType:
     """Double and return an update response."""
     try:
-        bg.double()
-        return await _update(game_id, bg)
+        g.state.double()
+        return await _update(game_id, g.state)
     except backgammon.backgammon.BackgammonError as error:
         raise ValueError(error)
 
 
-async def _exit(game_id: str, session_id: str) -> ResponseType:
+async def _exit(game_id: str, session_id: str) -> Tuple[ResponseType, ...]:
     """Leave the game and return a response."""
-    game: Dict[str, str] = await _load_game(game_id)
+    close_reponse: ResponseType = (False, {"code": ResponseCode.CLOSE.value})
+
+    g: game.Game = await game.load(game_id)
 
     async with session.load(session_id) as s:
-        player: Optional[int] = None
-        if s.id_ == game.get("player_0"):
-            player = 0
-        elif s.id_ == game.get("player_1"):
-            player = 1
-
-        if player is not None:
-            if game.get(f"player_{0 if player == 1 else 1}") is None:
-                await _delete_game(game_id)
+        if await g.set_status(s.id_, game.Status("forfeit")):
             await s.leave_game(game_id)
+            status_reponse: ResponseType = (
+                True,
+                {"code": ResponseCode.STATUS.value, "0": g.status_0, "1": g.status_1},
+            )
+            return status_reponse, close_reponse
 
-    return False, {"code": ResponseCode.CLOSE.value}
-
-
-async def _join(game_id: str, session_id: str) -> Tuple[ResponseType, ResponseType]:
-    """Join an open game, start a full game, and return player and update responses."""
-    player: Optional[int] = None
-    publish_update: bool = False
-
-    game: Dict[str, str] = await _load_game(game_id)
-    bg: backgammon.Backgammon = _decode_game(game)
-
-    async with session.load(session_id) as s:
-        if s.game_id is None:
-            if bg.match.game_state is backgammon.match.GameState.NOT_STARTED:
-                p: int = 0 if "player_0" not in game else 1
-                success: bool = await s.join_game(game_id, p)
-                if success:
-                    player = p
-                    if player == 1:
-                        bg.start()
-                        await _update(game_id, bg)
-                        publish_update = True
-        elif s.id_ == game.get("player_0"):
-            player = 0
-        elif s.id_ == game.get("player_1"):
-            player = 1
-
-    player_resp: ResponseType = (
-        False,
-        {"code": ResponseCode.PLAYER.value, "player": player},
-    )
-    update_resp: ResponseType = await _update(game_id, bg)
-
-    return player_resp, update_resp
+    return (close_reponse,)
 
 
 @_authorized
@@ -234,15 +264,14 @@ async def _move(
     game_id: str,
     session_id: str,
     s: session.Session,
-    game: Dict[str, str],
-    bg: backgammon.Backgammon,
+    g: game.Game,
     move: List[Optional[int]],
 ) -> ResponseType:
     """Apply the move and return an update response."""
     try:
-        bg.play(tuple(tuple(move[i : i + 2]) for i in range(0, len(move), 2)))
-        bg.end_turn()
-        return await _update(game_id, bg)
+        g.state.play(tuple(tuple(move[i : i + 2]) for i in range(0, len(move), 2)))
+        g.state.end_turn()
+        return await _update(game_id, g.state)
     except backgammon.backgammon.BackgammonError as error:
         raise ValueError(error)
 
@@ -252,13 +281,12 @@ async def _reject(
     game_id: str,
     session_id: str,
     s: session.Session,
-    game: Dict[str, str],
-    bg: backgammon.Backgammon,
+    g: game.Game,
 ) -> ResponseType:
     """Double and return an update response."""
     try:
-        bg.reject_double()
-        return await _update(game_id, bg)
+        g.state.reject_double()
+        return await _update(game_id, g.state)
     except backgammon.backgammon.BackgammonError as error:
         raise ValueError(error)
 
@@ -268,13 +296,12 @@ async def _roll(
     game_id: str,
     session_id: str,
     s: session.Session,
-    game: Dict[str, str],
-    bg: backgammon.Backgammon,
+    g: game.Game,
 ) -> ResponseType:
     """Roll the dice and return an update response."""
     try:
-        bg.roll()
-        return await _update(game_id, bg)
+        g.state.roll()
+        return await _update(game_id, g.state)
     except backgammon.backgammon.BackgammonError as error:
         raise ValueError(error)
 
@@ -284,38 +311,14 @@ async def _skip(
     game_id: str,
     session_id: str,
     s: session.Session,
-    game: Dict[str, str],
-    bg: backgammon.Backgammon,
+    g: game.Game,
 ) -> ResponseType:
     """Skip the user's turn and return an update response."""
     try:
-        bg.skip()
-        return await _update(game_id, bg)
+        g.state.skip()
+        return await _update(game_id, g.state)
     except backgammon.backgammon.BackgammonError as error:
         raise ValueError(error)
-
-
-async def _load_game(game_id: str) -> Dict[str, str]:
-    """Load and return the game."""
-    game: Dict[str, str]
-
-    async with redis.get_connection() as conn:
-        game = await conn.hgetall(f"game:{game_id}", encoding="utf-8")
-
-    if not game:
-        raise ValueError(f"Game not found: {game_id}")
-
-    return game
-
-
-def _decode_game(game: Dict[str, str]) -> backgammon.Backgammon:
-    """Decode the position and match IDs and return a Backgammon instance."""
-    return backgammon.Backgammon(game["position"], game["match"])
-
-
-async def _delete_game(game_id: str) -> None:
-    async with redis.get_connection() as conn:
-        await conn.delete(f"game:{game_id}")
 
 
 async def _update(game_id: str, bg: backgammon.Backgammon) -> ResponseType:

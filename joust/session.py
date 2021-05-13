@@ -49,22 +49,13 @@ class Session:
         async with redis.get_connection() as conn:
             self.game_id = await conn.hget("games", self.id_)
 
-    async def join_game(self, game_id: str, player: int) -> bool:
-        success: bool = False
-
+    async def join_game(self, game_id: str) -> None:
         async with redis.get_connection() as conn:
-            success = bool(
-                await conn.hsetnx(f"game:{game_id}", f"player_{player}", self.id_)
-            )
-            if success:
-                if self.authenticated:
-                    await conn.hset("games", self.id_, str(game_id))
-                else:
-                    await conn.hset(
-                        f"session:{self.session_id}", "game_id", str(game_id)
-                    )
-
-        return success
+            if self.authenticated:
+                await conn.hset("games", self.id_, game_id)
+            else:
+                await conn.hset(f"session:{self.session_id}", "game_id", game_id)
+        self.game_id = game_id
 
     async def leave_game(self, game_id: str) -> None:
         if self.game_id == game_id:
