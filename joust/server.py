@@ -14,11 +14,12 @@
 
 import aioredis
 import asyncio
+import json
 import logging
 import signal
 import socket
 import types
-from typing import List, Optional, Tuple, Type
+from typing import List, Optional, Tuple, Type, Union
 import os
 
 import backgammon
@@ -115,33 +116,39 @@ class Server:
                 await self._shutdown
         logger.info("Server stopped")
 
-    async def _handler(self, websocket: protocol.ServerProtocol, path: str):
-        publish: bool
-        msg: str
-
+    async def _handler(self, websocket: protocol.ServerProtocol, path: str) -> None:
         logger.info(f"{websocket.remote_address} - {websocket.game_id} [opened]")
 
         async with channels.get_channel(websocket):
             async for message in websocket:
-                try:
-                    responses: List[
-                        Tuple[bool, str]
-                    ] = await subprotocol.process_payload(
-                        websocket.game_id, websocket.session_token, message
-                    )
-                    for resp in responses:
-                        publish, msg = resp
-                        if publish:
-                            async with redis.get_connection() as conn:
-                                await conn.publish(str(websocket.game_id), msg)
-                        else:
-                            await websocket.send(msg)
-                except ValueError as error:
-                    logger.warning(
-                        f"{websocket.remote_address} - {websocket.game_id} [error]: {error}"
-                    )
+                await self._handle_message(websocket, message)
+
+            await self._handle_message(
+                websocket, json.dumps({"opcode": subprotocol.Opcode.DISCONNECT.value})
+            )
 
         logger.info(f"{websocket.remote_address} - {websocket.game_id} [closed]")
+
+    async def _handle_message(
+        self, websocket: protocol.ServerProtocol, message: str
+    ) -> None:
+        publish: bool
+
+        try:
+            responses: List[Tuple[bool, str]] = await subprotocol.process_payload(
+                websocket.game_id, websocket.session_token, message
+            )
+            for resp in responses:
+                publish, msg = resp
+                if publish:
+                    async with redis.get_connection() as conn:
+                        await conn.publish(websocket.game_id, msg)
+                else:
+                    await websocket.send(msg)
+        except ValueError as error:
+            logger.warning(
+                f"{websocket.remote_address} - {websocket.game_id} [error]: {error}"
+            )
 
     async def shutdown(self) -> None:
         await redis.close()

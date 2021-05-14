@@ -168,7 +168,6 @@ async def _accept(
 
 async def _disconnect(game_id: str, session_token: str) -> Optional[ResponseType]:
     """Update status and return a response."""
-
     g: game.Game = await game.load(game_id)
 
     async with session.load(session_token) as s:
