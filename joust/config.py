@@ -41,7 +41,7 @@ args: argparse.Namespace = parser.parse_args()
 
 logging.basicConfig(
     level=args.log_level,
-    format="[%(asctime)s] %(levelname)s %(name)s: %(message)s",
+    format="[%(asctime)s] %(levelname)s %(name)s:%(lineno)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
