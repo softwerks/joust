@@ -31,7 +31,6 @@ class Session:
     id_: str = dataclasses.field(init=False)
     last_seen: str
     token: str
-    session_type: str
     user_agent: str
     game_id: Optional[str] = None
     time_zone: Optional[str] = None
