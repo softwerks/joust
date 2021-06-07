@@ -14,7 +14,7 @@
 
 import http
 import logging
-from typing import Optional
+from typing import Mapping, Iterable, Optional, Tuple, Union
 import urllib.parse
 
 import websockets
@@ -31,7 +31,15 @@ class ServerProtocol(websockets.WebSocketServerProtocol):
 
     async def process_request(
         self, path: str, request_headers: websockets.http.Headers
-    ) -> Optional[websockets.server.HTTPResponse]:
+    ) -> Optional[
+        Tuple[
+            http.HTTPStatus,
+            Union[
+                websockets.http.Headers, Mapping[str, str], Iterable[Tuple[str, str]]
+            ],
+            bytes,
+        ]
+    ]:
         parsed_url: urllib.parse.ParseResult = urllib.parse.urlparse(path)
         query_params: dict = urllib.parse.parse_qs(parsed_url.query)
 
