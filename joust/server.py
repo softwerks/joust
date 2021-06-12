@@ -117,19 +117,27 @@ class Server:
         logger.info("Server stopped")
 
     async def _handler(self, websocket: protocol.ServerProtocol, path: str) -> None:
-        logger.info(f"{websocket.remote_address} - {websocket.game_id} [opened]")
-        await self._increment_connected()
+        try:
+            logger.info(f"{websocket.remote_address} - {websocket.game_id} [opened]")
 
-        async with channels.get_channel(websocket):
-            async for message in websocket:
-                await self._handle_message(websocket, message)
+            await self._increment_connected()
 
-            await self._handle_message(
-                websocket, json.dumps({"opcode": subprotocol.Opcode.DISCONNECT.value})
+            async with channels.get_channel(websocket):
+                async for message in websocket:
+                    await self._handle_message(websocket, message)
+
+                await self._handle_message(
+                    websocket,
+                    json.dumps({"opcode": subprotocol.Opcode.DISCONNECT.value}),
+                )
+
+            logger.info(f"{websocket.remote_address} - {websocket.game_id} [closed]")
+        except websockets.exceptions.ConnectionClosedError:
+            logger.info(
+                f"{websocket.remote_address} - {websocket.game_id} [closed abnormally]"
             )
-
-        logger.info(f"{websocket.remote_address} - {websocket.game_id} [closed]")
-        await self._decrement_connected()
+        finally:
+            await self._decrement_connected()
 
     async def _increment_connected(self) -> int:
         async with redis.get_connection() as conn:
