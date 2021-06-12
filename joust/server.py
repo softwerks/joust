@@ -118,6 +118,7 @@ class Server:
 
     async def _handler(self, websocket: protocol.ServerProtocol, path: str) -> None:
         logger.info(f"{websocket.remote_address} - {websocket.game_id} [opened]")
+        await self._increment_connected()
 
         async with channels.get_channel(websocket):
             async for message in websocket:
@@ -128,6 +129,11 @@ class Server:
             )
 
         logger.info(f"{websocket.remote_address} - {websocket.game_id} [closed]")
+        await self._decrement_connected()
+
+    async def _increment_connected(self) -> int:
+        async with redis.get_connection() as conn:
+            return await conn.incr("joust:connected")
 
     async def _handle_message(
         self, websocket: protocol.ServerProtocol, message: str
@@ -153,3 +159,7 @@ class Server:
     async def shutdown(self) -> None:
         await redis.close()
         logger.info("Server shutdown")
+
+    async def _decrement_connected(self) -> int:
+        async with redis.get_connection() as conn:
+            return await conn.decr("joust:connected")
