@@ -269,7 +269,6 @@ async def _move(
     """Apply the move and return an update response."""
     try:
         g.state.play(tuple(tuple(move[i : i + 2]) for i in range(0, len(move), 2)))
-        g.state.end_turn()
         return await _update(game_id, g.state)
     except backgammon.backgammon.BackgammonError as error:
         raise ValueError(error)
