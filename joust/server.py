@@ -141,7 +141,7 @@ class Server:
 
     async def _increment_connected(self) -> int:
         async with redis.get_connection() as conn:
-            return await conn.incr("joust:connected")
+            return await conn.incr("stats:connected")
 
     async def _handle_message(
         self, websocket: protocol.ServerProtocol, message: str
@@ -170,4 +170,4 @@ class Server:
 
     async def _decrement_connected(self) -> int:
         async with redis.get_connection() as conn:
-            return await conn.decr("joust:connected")
+            return await conn.decr("stats:connected")
