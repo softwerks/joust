@@ -17,7 +17,7 @@ import contextlib
 import logging
 from typing import AsyncGenerator, Optional
 
-from . import config
+from joust import config
 
 logger: logging.Logger = logging.getLogger(__name__)
 

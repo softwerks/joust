@@ -18,7 +18,7 @@ import dataclasses
 import logging
 from typing import AsyncGenerator, Dict, Optional
 
-from . import redis
+from joust import redis
 
 logger: logging.Logger = logging.getLogger(__name__)
 

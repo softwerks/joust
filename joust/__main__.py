@@ -20,8 +20,8 @@ try:
 except ImportError:
     hupper = None
 
-from . import config
-from . import server
+from joust import config
+from joust import server
 
 logger: logging.Logger = logging.getLogger(__name__)
 

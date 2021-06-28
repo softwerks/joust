@@ -19,17 +19,16 @@ import logging
 import signal
 import socket
 import types
-from typing import List, Optional, Tuple, Type, Union
+from typing import Optional, Type
 import os
 
 import backgammon
 import websockets
 
-from . import channels
-from . import config
-from . import protocol
-from . import redis
-from . import subprotocol
+from joust import config
+from joust import game
+from joust import protocol
+from joust import redis
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -91,6 +90,7 @@ class Server:
                 path=None,
                 sock=sock,
                 create_protocol=protocol.ServerProtocol,
+                subprotocols=["game", "match"],
             ):
                 logger.info(f"Running on {sock.getsockname()}")
                 await self._shutdown
@@ -99,6 +99,7 @@ class Server:
                 self._handler,
                 config.UNIX_SOCKET,
                 create_protocol=protocol.ServerProtocol,
+                subprotocols=["game", "match"],
             ):
                 logger.info(f"Running on {config.UNIX_SOCKET} (Press CTRL+C to quit)")
                 await self._shutdown
@@ -109,6 +110,7 @@ class Server:
                 config.PORT,
                 create_protocol=protocol.ServerProtocol,
                 reuse_port=config.REUSE_PORT,
+                subprotocols=["game", "match"],
             ):
                 logger.info(
                     f"Running on localhost:{config.PORT} (Press CTRL+C to quit)"
@@ -118,24 +120,18 @@ class Server:
 
     async def _handler(self, websocket: protocol.ServerProtocol, path: str) -> None:
         try:
-            logger.info(f"{websocket.remote_address} - {websocket.game_id} [opened]")
+            logger.info(f"{websocket.remote_address} [opened]")
 
             await self._increment_connected()
 
-            async with channels.get_channel(websocket):
-                async for message in websocket:
-                    await self._handle_message(websocket, message)
+            if websocket.subprotocol == "game":
+                await game.handler(websocket, path)
+            elif websocket.subprotocol == "match":
+                pass
 
-                await self._handle_message(
-                    websocket,
-                    json.dumps({"opcode": subprotocol.Opcode.DISCONNECT.value}),
-                )
-
-            logger.info(f"{websocket.remote_address} - {websocket.game_id} [closed]")
-        except websockets.exceptions.ConnectionClosedError:
-            logger.info(
-                f"{websocket.remote_address} - {websocket.game_id} [closed abnormally]"
-            )
+            logger.info(f"{websocket.remote_address} [closed]")
+        except websockets.exceptions.ConnectionClosedError as e:
+            logger.info(f"{websocket.remote_address} [closed abnormally]")
         finally:
             await self._decrement_connected()
 
@@ -143,31 +139,10 @@ class Server:
         async with redis.get_connection() as conn:
             return await conn.incr("stats:connected")
 
-    async def _handle_message(
-        self, websocket: protocol.ServerProtocol, message: str
-    ) -> None:
-        publish: bool
-
-        try:
-            responses: List[Tuple[bool, str]] = await subprotocol.process_payload(
-                websocket.game_id, websocket.session_token, message
-            )
-            for resp in responses:
-                publish, msg = resp
-                if publish:
-                    async with redis.get_connection() as conn:
-                        await conn.publish(websocket.game_id, msg)
-                else:
-                    await websocket.send(msg)
-        except ValueError as error:
-            logger.warning(
-                f"{websocket.remote_address} - {websocket.game_id} [error]: {error}"
-            )
+    async def _decrement_connected(self) -> int:
+        async with redis.get_connection() as conn:
+            return await conn.decr("stats:connected")
 
     async def shutdown(self) -> None:
         await redis.close()
         logger.info("Server shutdown")
-
-    async def _decrement_connected(self) -> int:
-        async with redis.get_connection() as conn:
-            return await conn.decr("stats:connected")

@@ -14,18 +14,17 @@
 
 import http
 import logging
-from typing import Mapping, Iterable, Optional, Tuple, Union
+from typing import List, Mapping, Iterable, Optional, Tuple, Union
 import urllib.parse
 
 import websockets
 
-from . import redis
+from joust import redis
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 
 class ServerProtocol(websockets.WebSocketServerProtocol):
-    game_id: str
     auth_token: str
     session_token: str
 
@@ -42,12 +41,6 @@ class ServerProtocol(websockets.WebSocketServerProtocol):
     ]:
         parsed_url: urllib.parse.ParseResult = urllib.parse.urlparse(path)
         query_params: dict = urllib.parse.parse_qs(parsed_url.query)
-
-        try:
-            self.game_id = parsed_url.path.rsplit("/", 1)[-1]
-        except ValueError:
-            logger.info(f"Invalid or missing game ID: {parsed_url.path}")
-            return (http.HTTPStatus.BAD_REQUEST, [], b"")
 
         try:
             self.auth_token = query_params["token"][0]

@@ -18,13 +18,16 @@ import json
 import jsonschema
 import logging
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+import urllib.parse
 
 import aioredis
 import backgammon
 
-from . import game
-from . import redis
-from . import session
+from joust.game import channels
+from joust.game import game
+from joust.protocol import ServerProtocol
+from joust import redis
+from joust import session
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -72,6 +75,51 @@ payload_schema: Dict[str, Any] = {
 }
 
 
+async def handler(websocket: ServerProtocol, path: str) -> None:
+    try:
+        url: urllib.parse.ParseResult = urllib.parse.urlparse(path)
+        websocket.game_id = url.path.rsplit("/", 1)[-1]
+
+        try:
+            async with redis.get_connection() as conn:
+                if not await conn.exists(f"game:{websocket.game_id}"):
+                    raise ValueError
+
+            async with channels.get_channel(websocket):
+                async for message in websocket:
+                    await _handle_message(websocket, message)
+
+                await _handle_message(
+                    websocket, json.dumps({"opcode": Opcode.DISCONNECT.value})
+                )
+
+        except ValueError:
+            logger.warning(f"Invalid game ID: {websocket.game_id}")
+
+    except IndexError:
+        logger.warning(f"Invalid path: {path}")
+
+
+async def _handle_message(websocket: ServerProtocol, message: str) -> None:
+    publish: bool
+
+    try:
+        responses: List[Tuple[bool, str]] = await _process_payload(
+            websocket.game_id, websocket.session_token, message
+        )
+        for resp in responses:
+            publish, msg = resp
+            if publish:
+                async with redis.get_connection() as conn:
+                    await conn.publish(websocket.game_id, msg)
+            else:
+                await websocket.send(msg)
+    except ValueError as error:
+        logger.warning(
+            f"{websocket.remote_address} - {websocket.game_id} [error]: {error}"
+        )
+
+
 def _authorized(func: Callable) -> Callable:
     @functools.wraps(func)
     async def wrapper(
@@ -89,7 +137,7 @@ def _authorized(func: Callable) -> Callable:
     return wrapper
 
 
-async def process_payload(
+async def _process_payload(
     game_id: str, session_token: str, serialized_payload: Union[str, bytes]
 ) -> List[Tuple[bool, str]]:
     """Process the payload and return a list of responses."""

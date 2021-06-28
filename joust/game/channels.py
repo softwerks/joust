@@ -19,12 +19,12 @@ from typing import AsyncGenerator, Dict, Set
 
 import aioredis
 
-from . import redis
-from . import protocol
+from joust import redis
+from joust.protocol import ServerProtocol
 
 logger: logging.Logger = logging.getLogger(__name__)
 
-channels: Dict[str, Set[protocol.ServerProtocol]] = {}
+channels: Dict[str, Set[ServerProtocol]] = {}
 
 
 async def reader(message_queue: aioredis.Channel) -> None:
@@ -40,7 +40,7 @@ async def reader(message_queue: aioredis.Channel) -> None:
     logger.info(f"Stopped listening to {c}")
 
 
-async def subscribe(websocket: protocol.ServerProtocol) -> None:
+async def subscribe(websocket: ServerProtocol) -> None:
     global channels
 
     c: str = str(websocket.game_id)
@@ -56,7 +56,7 @@ async def subscribe(websocket: protocol.ServerProtocol) -> None:
     logger.info(f"{websocket.remote_address} - {c} [subscribed]")
 
 
-async def unsubscribe(websocket: protocol.ServerProtocol) -> None:
+async def unsubscribe(websocket: ServerProtocol) -> None:
     global channels
 
     c: str = str(websocket.game_id)
@@ -72,7 +72,7 @@ async def unsubscribe(websocket: protocol.ServerProtocol) -> None:
 
 
 @contextlib.asynccontextmanager
-async def get_channel(websocket: protocol.ServerProtocol) -> AsyncGenerator[None, None]:
+async def get_channel(websocket: ServerProtocol) -> AsyncGenerator[None, None]:
     await subscribe(websocket)
     try:
         yield

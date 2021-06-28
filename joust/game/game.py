@@ -18,7 +18,7 @@ from typing import Dict, Optional
 
 import backgammon
 
-from . import redis
+from joust import redis
 
 
 @enum.unique
