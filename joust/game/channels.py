@@ -27,54 +27,50 @@ logger: logging.Logger = logging.getLogger(__name__)
 channels: Dict[str, Set[ServerProtocol]] = {}
 
 
-async def reader(message_queue: aioredis.Channel) -> None:
+async def reader(message_queue: aioredis.Channel, game_id: str) -> None:
     global channels
 
-    c: str = message_queue.name.decode()
-
-    logger.info(f"Started listening to {c}")
+    logger.info(f"Started listening to {game_id}")
     async for message in message_queue.iter(encoding="utf-8"):
-        logger.info(f"Broadcasting to {c}: {str(message)}")
-        for websocket in channels[c]:
+        logger.info(f"Broadcasting to {game_id}: {str(message)}")
+        for websocket in channels[game_id]:
             await websocket.send(str(message))
-    logger.info(f"Stopped listening to {c}")
+    logger.info(f"Stopped listening to {game_id}")
 
 
-async def subscribe(websocket: ServerProtocol) -> None:
+async def subscribe(websocket: ServerProtocol, game_id: str) -> None:
     global channels
 
-    c: str = str(websocket.game_id)
-
-    if c not in channels:
-        channels[c] = set()
+    if game_id not in channels:
+        channels[game_id] = set()
         async with redis.get_connection() as conn:
-            message_queue: aioredis.Channel = (await conn.subscribe(c))[0]
-            logger.info(f"Subscribed to {c}")
-        asyncio.get_running_loop().create_task(reader(message_queue))
+            message_queue: aioredis.Channel = (await conn.subscribe(game_id))[0]
+            logger.info(f"Subscribed to {game_id}")
+        asyncio.get_running_loop().create_task(reader(message_queue, game_id))
 
-    channels[c].add(websocket)
-    logger.info(f"{websocket.remote_address} - {c} [subscribed]")
+    channels[game_id].add(websocket)
+    logger.info(f"{websocket.remote_address} - {game_id} [subscribed]")
 
 
-async def unsubscribe(websocket: ServerProtocol) -> None:
+async def unsubscribe(websocket: ServerProtocol, game_id: str) -> None:
     global channels
 
-    c: str = str(websocket.game_id)
+    channels[game_id].remove(websocket)
+    logger.info(f"{websocket.remote_address} - {game_id} [unsubscribed]")
 
-    channels[c].remove(websocket)
-    logger.info(f"{websocket.remote_address} - {c} [unsubscribed]")
-
-    if not channels[c]:
+    if not channels[game_id]:
         async with redis.get_connection() as conn:
-            await conn.unsubscribe(c)
-            logger.info(f"Unsubscribed from {c}")
-        del channels[c]
+            await conn.unsubscribe(game_id)
+            logger.info(f"Unsubscribed from {game_id}")
+        del channels[game_id]
 
 
 @contextlib.asynccontextmanager
-async def get_channel(websocket: ServerProtocol) -> AsyncGenerator[None, None]:
-    await subscribe(websocket)
+async def get_channel(
+    websocket: ServerProtocol, game_id: str
+) -> AsyncGenerator[None, None]:
+    await subscribe(websocket, game_id)
     try:
         yield
     finally:
-        await unsubscribe(websocket)
+        await unsubscribe(websocket, game_id)

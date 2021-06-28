@@ -78,46 +78,46 @@ payload_schema: Dict[str, Any] = {
 async def handler(websocket: ServerProtocol, path: str) -> None:
     try:
         url: urllib.parse.ParseResult = urllib.parse.urlparse(path)
-        websocket.game_id = url.path.rsplit("/", 1)[-1]
+        game_id: str = url.path.rsplit("/", 1)[-1]
 
         try:
             async with redis.get_connection() as conn:
-                if not await conn.exists(f"game:{websocket.game_id}"):
+                if not await conn.exists(f"game:{game_id}"):
                     raise ValueError
 
-            async with channels.get_channel(websocket):
+            async with channels.get_channel(websocket, game_id):
                 async for message in websocket:
-                    await _handle_message(websocket, message)
+                    await _handle_message(websocket, game_id, message)
 
                 await _handle_message(
-                    websocket, json.dumps({"opcode": Opcode.DISCONNECT.value})
+                    websocket, game_id, json.dumps({"opcode": Opcode.DISCONNECT.value})
                 )
 
         except ValueError:
-            logger.warning(f"Invalid game ID: {websocket.game_id}")
+            logger.warning(f"Invalid game ID: {game_id}")
 
     except IndexError:
         logger.warning(f"Invalid path: {path}")
 
 
-async def _handle_message(websocket: ServerProtocol, message: str) -> None:
+async def _handle_message(
+    websocket: ServerProtocol, game_id: str, message: str
+) -> None:
     publish: bool
 
     try:
         responses: List[Tuple[bool, str]] = await _process_payload(
-            websocket.game_id, websocket.session_token, message
+            game_id, websocket.session_token, message
         )
         for resp in responses:
             publish, msg = resp
             if publish:
                 async with redis.get_connection() as conn:
-                    await conn.publish(websocket.game_id, msg)
+                    await conn.publish(game_id, msg)
             else:
                 await websocket.send(msg)
     except ValueError as error:
-        logger.warning(
-            f"{websocket.remote_address} - {websocket.game_id} [error]: {error}"
-        )
+        logger.warning(f"{websocket.remote_address} - {game_id} [error]: {error}")
 
 
 def _authorized(func: Callable) -> Callable:
