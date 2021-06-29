@@ -13,6 +13,8 @@
 # limitations under the License.
 
 import asyncio
+import enum
+import json
 import logging
 
 import aioredis
@@ -22,6 +24,12 @@ from joust import redis
 from joust import session
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+
+@enum.unique
+class Opcode(enum.Enum):
+    ADD: str = "add"
+    REM: str = "rem"
 
 
 async def handler(websocket: ServerProtocol, path: str) -> None:
@@ -40,7 +48,9 @@ async def _queue(websocket: ServerProtocol) -> None:
     user: session.Session = await session.load(websocket.session_token)
     conn: aioredis.Redis = await redis.get_connection()
 
-    await conn.publish("tournament:queue", user.id_)
+    await conn.publish(
+        "tournament:queue", json.dumps({"opcode": Opcode.ADD.value, "user": user.id_})
+    )
 
     channel: str = f"tournament:{user.id_}"
     message_queue: aioredis.Channel = (await conn.subscribe(channel))[0]
@@ -49,8 +59,10 @@ async def _queue(websocket: ServerProtocol) -> None:
         game_id: str = await message_queue.get(encoding="utf-8")
         logger.info(game_id)
     except asyncio.CancelledError:
-        # remove from queue
-        pass
+        await conn.publish(
+            "tournament:queue",
+            json.dumps({"opcode": Opcode.REM.value, "user": user.id_}),
+        )
     finally:
         await conn.unsubscribe(channel)
 
