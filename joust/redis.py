@@ -13,30 +13,31 @@
 # limitations under the License.
 
 import aioredis
-import contextlib
 import logging
-from typing import AsyncGenerator, Optional
+from typing import Optional
 
 from joust import config
 
 logger: logging.Logger = logging.getLogger(__name__)
 
-redis: Optional[aioredis.Redis] = None
+_redis: Optional[aioredis.Redis] = None
 
 
-@contextlib.asynccontextmanager
-async def get_connection() -> AsyncGenerator[aioredis.Redis, None]:
-    global redis
-    if redis is None:
-        redis = await aioredis.create_redis_pool(config.REDIS)
+async def get_connection() -> aioredis.Redis:
+    global _redis
+
+    if _redis is None:
+        _redis = await aioredis.create_redis_pool(config.REDIS)
         logger.info(f"Redis connected on {config.REDIS}")
-    yield redis
+
+    return _redis
 
 
 async def close() -> None:
-    global redis
-    if redis is not None:
+    global _redis
+
+    if _redis is not None:
         logger.info("Closing Redis connection")
-        redis.close()
-        await redis.wait_closed()
+        _redis.close()
+        await _redis.wait_closed()
         logger.info("Redis connection closed")

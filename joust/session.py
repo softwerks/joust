@@ -13,10 +13,11 @@
 # limitations under the License.
 
 import asyncio
-import contextlib
 import dataclasses
 import logging
-from typing import AsyncGenerator, Dict, Optional
+from typing import Dict, Optional
+
+import aioredis
 
 from joust import redis
 
@@ -45,37 +46,36 @@ class Session:
             self.id_ = self.token
 
     async def _lookup_game_id(self) -> None:
-        async with redis.get_connection() as conn:
-            self.game_id = await conn.hget("games", self.id_)
+        conn: aioredis.Redis = await redis.get_connection()
+        self.game_id = await conn.hget("games", self.id_)
 
     async def join_game(self, game_id: str) -> None:
-        async with redis.get_connection() as conn:
-            if self.authenticated:
-                await conn.hset("games", self.id_, game_id)
-            else:
-                await conn.hset(f"session:{self.token}", "game_id", game_id)
+        conn: aioredis.Redis = await redis.get_connection()
+        if self.authenticated:
+            await conn.hset("games", self.id_, game_id)
+        else:
+            await conn.hset(f"session:{self.token}", "game_id", game_id)
         self.game_id = game_id
 
     async def leave_game(self, game_id: str) -> None:
         if self.game_id == game_id:
-            async with redis.get_connection() as conn:
-                if self.authenticated:
-                    await conn.hdel("games", self.id_)
-                else:
-                    await conn.hdel(f"session:{self.token}", "game_id")
+            conn: aioredis.Redis = await redis.get_connection()
+            if self.authenticated:
+                await conn.hdel("games", self.id_)
+            else:
+                await conn.hdel(f"session:{self.token}", "game_id")
             self.game_id = None
 
 
-@contextlib.asynccontextmanager
-async def load(token: str) -> AsyncGenerator[Session, None]:
-    async with redis.get_connection() as conn:
-        session_data: Dict[str, str] = await conn.hgetall(
-            f"session:{token}", encoding="utf-8"
-        )
+async def load(token: str) -> Session:
+    conn: aioredis.Redis = await redis.get_connection()
+    session_data: Dict[str, str] = await conn.hgetall(
+        f"session:{token}", encoding="utf-8"
+    )
 
     session: Session = Session(token=token, **session_data)
 
     if session.authenticated:
         await session._lookup_game_id()
 
-    yield session
+    return session

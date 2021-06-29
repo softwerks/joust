@@ -16,6 +16,7 @@ import dataclasses
 import enum
 from typing import Dict, Optional
 
+import aioredis
 import backgammon
 
 from joust import redis
@@ -57,15 +58,15 @@ class Game:
         """Try to add the player to the game and return the player ID."""
         player: Optional[int] = None
 
-        async with redis.get_connection() as conn:
-            if self.player_0 is None:
-                if await conn.hsetnx(f"game:{self.id_}", f"player_0", session_id):
-                    player = 0
-                    self.player_0 = session_id
-            elif self.player_1 is None:
-                if await conn.hsetnx(f"game:{self.id_}", f"player_1", session_id):
-                    player = 1
-                    self.player_1 = session_id
+        conn: aioredis.Redis = await redis.get_connection()
+        if self.player_0 is None:
+            if await conn.hsetnx(f"game:{self.id_}", f"player_0", session_id):
+                player = 0
+                self.player_0 = session_id
+        elif self.player_1 is None:
+            if await conn.hsetnx(f"game:{self.id_}", f"player_1", session_id):
+                player = 1
+                self.player_1 = session_id
 
         return player
 
@@ -79,29 +80,27 @@ class Game:
 
         player: Optional[int] = await self.get_player(session_id)
         if player is not None:
-            async with redis.get_connection() as conn:
-                if player == 0:
-                    await conn.hset(f"game:{self.id_}", "status_0", status.value)
-                    self.status_0 = status.value
-                elif player == 1:
-                    await conn.hset(f"game:{self.id_}", "status_1", status.value)
-                    self.status_1 = status.value
+            conn: aioredis.Redis = await redis.get_connection()
+            if player == 0:
+                await conn.hset(f"game:{self.id_}", "status_0", status.value)
+                self.status_0 = status.value
+            elif player == 1:
+                await conn.hset(f"game:{self.id_}", "status_1", status.value)
+                self.status_1 = status.value
             status_updated = True
 
         return status_updated
 
     async def delete(self) -> None:
         """Delete the game."""
-        async with redis.get_connection() as conn:
-            await conn.delete(f"game:{self.id_}")
+        conn: aioredis.Redis = await redis.get_connection()
+        await conn.delete(f"game:{self.id_}")
 
 
 async def load(game_id: str) -> Game:
     """Load and return the game."""
-    async with redis.get_connection() as conn:
-        game_data: Dict[str, str] = await conn.hgetall(
-            f"game:{game_id}", encoding="utf-8"
-        )
+    conn: aioredis.Redis = await redis.get_connection()
+    game_data: Dict[str, str] = await conn.hgetall(f"game:{game_id}", encoding="utf-8")
 
     if not game_data:
         raise ValueError(f"Game not found: {game_id}")

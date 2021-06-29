@@ -81,9 +81,9 @@ async def handler(websocket: ServerProtocol, path: str) -> None:
         game_id: str = url.path.rsplit("/", 1)[-1]
 
         try:
-            async with redis.get_connection() as conn:
-                if not await conn.exists(f"game:{game_id}"):
-                    raise ValueError
+            conn: aioredis.Redis = await redis.get_connection()
+            if not await conn.exists(f"game:{game_id}"):
+                raise ValueError
 
             async with channels.get_channel(websocket, game_id):
                 async for message in websocket:
@@ -112,8 +112,8 @@ async def _handle_message(
         for resp in responses:
             publish, msg = resp
             if publish:
-                async with redis.get_connection() as conn:
-                    await conn.publish(game_id, msg)
+                conn: aioredis.Redis = await redis.get_connection()
+                await conn.publish(game_id, msg)
             else:
                 await websocket.send(msg)
     except ValueError as error:
@@ -125,12 +125,12 @@ def _authorized(func: Callable) -> Callable:
     async def wrapper(
         game_id: str, session_token: str, *args, **kwargs
     ) -> Union[Callable, ResponseType]:
-        async with session.load(session_token) as s:
-            if s.game_id == game_id:
-                g: game.Game = await game.load(game_id)
+        user: session.Session = await session.load(session_token)
+        if user.game_id == game_id:
+            g: game.Game = await game.load(game_id)
 
-                if s.id_ == g.get_turn():
-                    return await func(game_id, session_token, s, g, *args, **kwargs)
+            if user.id_ == g.get_turn():
+                return await func(game_id, session_token, user, g, *args, **kwargs)
 
         return False, {"code": ResponseCode.ERROR.value, "error": "Unauthorized"}
 
@@ -218,13 +218,13 @@ async def _disconnect(game_id: str, session_token: str) -> Optional[ResponseType
     """Update status and return a response."""
     g: game.Game = await game.load(game_id)
 
-    async with session.load(session_token) as s:
-        if await g.set_status(s.id_, game.Status("disconnected")):
-            status_response: ResponseType = (
-                True,
-                {"code": ResponseCode.STATUS.value, "0": g.status_0, "1": g.status_1},
-            )
-            return status_response
+    user: session.Session = await session.load(session_token)
+    if await g.set_status(user.id_, game.Status("disconnected")):
+        status_response: ResponseType = (
+            True,
+            {"code": ResponseCode.STATUS.value, "0": g.status_0, "1": g.status_1},
+        )
+        return status_response
 
     return None
 
@@ -237,32 +237,32 @@ async def _connect(game_id: str, session_token: str) -> Tuple[ResponseType, ...]
 
     g: game.Game = await game.load(game_id)
 
-    async with session.load(session_token) as s:
-        if s.game_id == game_id:
-            player = await g.get_player(s.id_)
-        elif (
-            s.game_id is None
-            and g.state.match.game_state is backgammon.match.GameState.NOT_STARTED
-        ):
-            player = await g.join_game(s.id_)
-            if player is not None:
-                await s.join_game(game_id)
-            if player == 1:
-                g.state.start()
-                await _update(game_id, g.state)
-                publish_update = True
-
+    user: session.Session = await session.load(session_token)
+    if user.game_id == game_id:
+        player = await g.get_player(user.id_)
+    elif (
+        user.game_id is None
+        and g.state.match.game_state is backgammon.match.GameState.NOT_STARTED
+    ):
+        player = await g.join_game(user.id_)
         if player is not None:
-            await g.set_status(s.id_, game.Status("connected"))
-            player_response: ResponseType = (
-                False,
-                {"code": ResponseCode.PLAYER.value, "player": player},
-            )
-            status_response: ResponseType = (
-                True,
-                {"code": ResponseCode.STATUS.value, "0": g.status_0, "1": g.status_1},
-            )
-            responses += player_response, status_response
+            await user.join_game(game_id)
+        if player == 1:
+            g.state.start()
+            await _update(game_id, g.state)
+            publish_update = True
+
+    if player is not None:
+        await g.set_status(user.id_, game.Status("connected"))
+        player_response: ResponseType = (
+            False,
+            {"code": ResponseCode.PLAYER.value, "player": player},
+        )
+        status_response: ResponseType = (
+            True,
+            {"code": ResponseCode.STATUS.value, "0": g.status_0, "1": g.status_1},
+        )
+        responses += player_response, status_response
 
     update_response: ResponseType = (
         publish_update,
@@ -294,14 +294,14 @@ async def _exit(game_id: str, session_token: str) -> Tuple[ResponseType, ...]:
 
     g: game.Game = await game.load(game_id)
 
-    async with session.load(session_token) as s:
-        if await g.set_status(s.id_, game.Status("forfeit")):
-            await s.leave_game(game_id)
-            status_reponse: ResponseType = (
-                True,
-                {"code": ResponseCode.STATUS.value, "0": g.status_0, "1": g.status_1},
-            )
-            return status_reponse, close_reponse
+    user: session.Session = await session.load(session_token)
+    if await g.set_status(user.id_, game.Status("forfeit")):
+        await user.leave_game(game_id)
+        status_reponse: ResponseType = (
+            True,
+            {"code": ResponseCode.STATUS.value, "0": g.status_0, "1": g.status_1},
+        )
+        return status_reponse, close_reponse
 
     return (close_reponse,)
 
@@ -371,10 +371,10 @@ async def _update(game_id: str, bg: backgammon.Backgammon) -> ResponseType:
     """Update the stored game state and return an update response."""
     publish: bool = True
 
-    async with redis.get_connection() as conn:
-        pipeline: aioredis.commands.transaction.MultiExec = conn.multi_exec()
-        pipeline.hset(f"game:{game_id}", "position", bg.position.encode())
-        pipeline.hset(f"game:{game_id}", "match", bg.match.encode())
-        await pipeline.execute()
+    conn: aioredis.Redis = await redis.get_connection()
+    pipeline: aioredis.commands.transaction.MultiExec = conn.multi_exec()
+    pipeline.hset(f"game:{game_id}", "position", bg.position.encode())
+    pipeline.hset(f"game:{game_id}", "match", bg.match.encode())
+    await pipeline.execute()
 
     return publish, {"code": ResponseCode.UPDATE.value, "id": bg.encode()}

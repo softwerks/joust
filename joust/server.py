@@ -27,6 +27,7 @@ import websockets
 
 from joust import config
 from joust import game
+from joust import match
 from joust import protocol
 from joust import redis
 
@@ -127,7 +128,7 @@ class Server:
             if websocket.subprotocol == "game":
                 await game.handler(websocket, path)
             elif websocket.subprotocol == "match":
-                pass
+                await match.handler(websocket, path)
 
             logger.info(f"{websocket.remote_address} [closed]")
         except websockets.exceptions.ConnectionClosedError as e:
@@ -136,12 +137,12 @@ class Server:
             await self._decrement_connected()
 
     async def _increment_connected(self) -> int:
-        async with redis.get_connection() as conn:
-            return await conn.incr("stats:connected")
+        conn: aioredis.Redis = await redis.get_connection()
+        return await conn.incr("stats:connected")
 
     async def _decrement_connected(self) -> int:
-        async with redis.get_connection() as conn:
-            return await conn.decr("stats:connected")
+        conn: aioredis.Redis = await redis.get_connection()
+        return await conn.decr("stats:connected")
 
     async def shutdown(self) -> None:
         await redis.close()

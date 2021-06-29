@@ -43,9 +43,9 @@ async def subscribe(websocket: ServerProtocol, game_id: str) -> None:
 
     if game_id not in channels:
         channels[game_id] = set()
-        async with redis.get_connection() as conn:
-            message_queue: aioredis.Channel = (await conn.subscribe(game_id))[0]
-            logger.info(f"Subscribed to {game_id}")
+        conn: aioredis.Redis = await redis.get_connection()
+        message_queue: aioredis.Channel = (await conn.subscribe(game_id))[0]
+        logger.info(f"Subscribed to {game_id}")
         asyncio.get_running_loop().create_task(reader(message_queue, game_id))
 
     channels[game_id].add(websocket)
@@ -59,9 +59,9 @@ async def unsubscribe(websocket: ServerProtocol, game_id: str) -> None:
     logger.info(f"{websocket.remote_address} - {game_id} [unsubscribed]")
 
     if not channels[game_id]:
-        async with redis.get_connection() as conn:
-            await conn.unsubscribe(game_id)
-            logger.info(f"Unsubscribed from {game_id}")
+        conn: aioredis.Redis = await redis.get_connection()
+        await conn.unsubscribe(game_id)
+        logger.info(f"Unsubscribed from {game_id}")
         del channels[game_id]
 
 

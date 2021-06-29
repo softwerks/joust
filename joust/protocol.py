@@ -17,6 +17,7 @@ import logging
 from typing import List, Mapping, Iterable, Optional, Tuple, Union
 import urllib.parse
 
+import aioredis
 import websockets
 
 from joust import redis
@@ -52,10 +53,10 @@ class ServerProtocol(websockets.WebSocketServerProtocol):
                 b"Missing credentials\n",
             )
 
-        async with redis.get_connection() as conn:
-            session_token: Optional[str] = await conn.get(
-                f"websocket:{self.auth_token}", encoding="utf-8"
-            )
+        conn: aioredis.Redis = await redis.get_connection()
+        session_token: Optional[str] = await conn.get(
+            f"websocket:{self.auth_token}", encoding="utf-8"
+        )
         if session_token is None:
             logger.info(f"Invalid token: {self.auth_token}")
             return (
