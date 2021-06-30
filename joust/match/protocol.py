@@ -32,6 +32,11 @@ class Opcode(enum.Enum):
     REM: str = "rem"
 
 
+@enum.unique
+class ResponseCode(enum.Enum):
+    FOUND: str = "found"
+
+
 async def handler(websocket: ServerProtocol, path: str) -> None:
     done, pending = await asyncio.wait(
         [_queue(websocket), _handle_message(websocket)],
@@ -57,7 +62,9 @@ async def _queue(websocket: ServerProtocol) -> None:
 
     try:
         game_id: str = await message_queue.get(encoding="utf-8")
-        logger.info(game_id)
+        await websocket.send(
+            json.dumps({"code": ResponseCode.FOUND.value, "gameID": game_id})
+        )
     except asyncio.CancelledError:
         await conn.publish(
             "tournament:queue",
