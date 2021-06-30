@@ -238,19 +238,13 @@ async def _connect(game_id: str, session_token: str) -> Tuple[ResponseType, ...]
     g: game.Game = await game.load(game_id)
 
     user: session.Session = await session.load(session_token)
+
     if user.game_id == game_id:
         player = await g.get_player(user.id_)
-    elif (
-        user.game_id is None
-        and g.state.match.game_state is backgammon.match.GameState.NOT_STARTED
-    ):
+    elif user.game_id is None and (g.player_0 == None or g.player_1 == None):
         player = await g.join_game(user.id_)
         if player is not None:
             await user.join_game(game_id)
-        if player == 1:
-            g.state.start()
-            await _update(game_id, g.state)
-            publish_update = True
 
     if player is not None:
         await g.set_status(user.id_, game.Status("connected"))
@@ -263,6 +257,15 @@ async def _connect(game_id: str, session_token: str) -> Tuple[ResponseType, ...]
             {"code": ResponseCode.STATUS.value, "0": g.status_0, "1": g.status_1},
         )
         responses += player_response, status_response
+
+    if (
+        g.state.match.game_state is backgammon.match.GameState.NOT_STARTED
+        and g.player_0 != None
+        and g.player_1 != None
+    ):
+        g.state.start()
+        await _update(game_id, g.state)
+        publish_update = True
 
     update_response: ResponseType = (
         publish_update,
