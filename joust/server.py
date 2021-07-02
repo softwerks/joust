@@ -120,21 +120,30 @@ class Server:
         logger.info("Server stopped")
 
     async def _handler(self, websocket: protocol.ServerProtocol, path: str) -> None:
-        try:
-            logger.info(f"{websocket.remote_address} [opened]")
+        remote_address: str = self._remote_address(websocket)
 
+        logger.info(f"{remote_address} [opened]")
+
+        try:
             await self._increment_connected()
 
             if websocket.subprotocol == "game":
                 await game.handler(websocket, path)
             elif websocket.subprotocol == "match":
                 await match.handler(websocket, path)
-
-            logger.info(f"{websocket.remote_address} [closed]")
         except websockets.exceptions.ConnectionClosedError as e:
-            logger.info(f"{websocket.remote_address} [closed abnormally]")
+            logger.info(f"{remote_address} [closed abnormally]")
         finally:
             await self._decrement_connected()
+            logger.info(f"{remote_address} [closed]")
+
+    def _remote_address(self, websocket: protocol.ServerProtocol) -> str:
+        if "X-Real-IP" in websocket.request_headers:
+            return websocket.request_headers["X-Real-IP"]
+        elif websocket.remote_address is not None:
+            return websocket.remote_address[0]
+        else:
+            return "unknown"
 
     async def _increment_connected(self) -> int:
         conn: aioredis.Redis = await redis.get_connection()
