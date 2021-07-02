@@ -19,7 +19,7 @@ with open("README.md", encoding="utf-8") as f:
 
 setup(
     name="joust",
-    version="0.1.1",
+    version="1.0.0",
     author="Softwerks",
     author_email="info@softwerks.com",
     description="Websocket server for the Backgammon Network.",
