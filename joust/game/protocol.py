@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from datetime import datetime, timedelta, timezone
 import enum
 import functools
 import json
@@ -52,6 +53,7 @@ class Opcode(enum.Enum):
 class ResponseCode(enum.Enum):
     CLOSE: str = "close"
     ERROR: str = "error"
+    FEEDBACK: str = "feedback"
     PLAYER: str = "player"
     STATUS: str = "status"
     UPDATE: str = "update"
@@ -293,20 +295,33 @@ async def _double(
 
 async def _exit(game_id: str, session_token: str) -> Tuple[ResponseType, ...]:
     """Leave the game and return a response."""
-    close_reponse: ResponseType = (False, {"code": ResponseCode.CLOSE.value})
+    exit_reponse: ResponseType
+
+    user: session.Session = await session.load(session_token)
+
+    if user.feedback is None:
+        exit_reponse = (False, {"code": ResponseCode.FEEDBACK.value})
+    else:
+        feedback: datetime = datetime.fromtimestamp(float(user.feedback), timezone.utc)
+        now: datetime = datetime.now(timezone.utc)
+        delta: timedelta = now - feedback
+
+        if delta > timedelta(days=7):
+            exit_reponse = (False, {"code": ResponseCode.FEEDBACK.value})
+        else:
+            exit_reponse = (False, {"code": ResponseCode.CLOSE.value})
 
     g: game.Game = await game.load(game_id)
 
-    user: session.Session = await session.load(session_token)
     if await g.set_status(user.id_, game.Status("forfeit")):
         await user.leave_game(game_id)
         status_reponse: ResponseType = (
             True,
             {"code": ResponseCode.STATUS.value, "0": g.status_0, "1": g.status_1},
         )
-        return status_reponse, close_reponse
+        return status_reponse, exit_reponse
 
-    return (close_reponse,)
+    return (exit_reponse,)
 
 
 @_authorized
