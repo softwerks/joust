@@ -34,6 +34,7 @@ class Session:
     token: str
     user_agent: str
     game_id: Optional[str] = None
+    feedback: Optional[str] = None
     time_zone: Optional[str] = None
     user_id: Optional[str] = None
 
