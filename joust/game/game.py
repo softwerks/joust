@@ -14,12 +14,17 @@
 
 import dataclasses
 import enum
+import time
 from typing import Dict, Optional
 
 import aioredis
 import backgammon
 
 from joust import redis
+
+
+MATCH_TIME: int = 120000  # 2 minutes / point
+DELAY_TIME: int = 15000  # 15 seconds / turn
 
 
 @enum.unique
@@ -39,6 +44,9 @@ class Game:
     player_1: Optional[str] = None
     status_0: Optional[str] = None
     status_1: Optional[str] = None
+    time_0: str = "0"
+    time_1: str = "0"
+    timestamp: str = "0"
 
     def __post_init__(self) -> None:
         self.state = backgammon.Backgammon(self.position, self.match)
@@ -95,6 +103,28 @@ class Game:
         """Delete the game."""
         conn: aioredis.Redis = await redis.get_connection()
         await conn.delete(f"game:{self.id_}")
+
+    def ms_timestamp(self) -> int:
+        """Return the time in milliseconds since the epoch."""
+        return int(time.time() * 1000)
+
+    def start_clock(self) -> None:
+        """Set the players' clocks and record the current time."""
+        self.time_0 = self.time_1 = str(self.state.match.length * MATCH_TIME)
+        self.timestamp = str(self.ms_timestamp())
+
+    def swap_clock(self, turn_owner: int) -> None:
+        """Stop the turn owner's clock and start the opponent's clock."""
+        new_timestamp: int = self.ms_timestamp()
+
+        elapsed: int = max(0, (new_timestamp - int(self.timestamp)) - DELAY_TIME)
+
+        if turn_owner == 0:
+            self.time_0 = str(int(self.time_0) - elapsed)
+        else:
+            self.time_1 = str(int(self.time_1) - elapsed)
+
+        self.timestamp = str(new_timestamp)
 
 
 async def load(game_id: str) -> Game:

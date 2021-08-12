@@ -210,8 +210,10 @@ async def _accept(
 ) -> ResponseType:
     """Double and return an update response."""
     try:
+        turn_owner: int = g.state.match.turn.value
         g.state.accept_double()
-        return await _update(game_id, g.state)
+        g.swap_clock(turn_owner)
+        return await _update(game_id, g)
     except backgammon.backgammon.BackgammonError as error:
         raise ValueError(error)
 
@@ -266,13 +268,10 @@ async def _connect(game_id: str, session_token: str) -> Tuple[ResponseType, ...]
         and g.player_1 != None
     ):
         g.state.start()
-        await _update(game_id, g.state)
+        g.start_clock()
         publish_update = True
 
-    update_response: ResponseType = (
-        publish_update,
-        {"code": ResponseCode.UPDATE.value, "id": g.state.encode()},
-    )
+    update_response: ResponseType = await _update(game_id, g, publish_update)
     responses += (update_response,)
 
     return responses
@@ -287,8 +286,10 @@ async def _double(
 ) -> ResponseType:
     """Double and return an update response."""
     try:
+        turn_owner: int = g.state.match.turn.value
         g.state.double()
-        return await _update(game_id, g.state)
+        g.swap_clock(turn_owner)
+        return await _update(game_id, g)
     except backgammon.backgammon.BackgammonError as error:
         raise ValueError(error)
 
@@ -334,8 +335,10 @@ async def _move(
 ) -> ResponseType:
     """Apply the move and return an update response."""
     try:
+        turn_owner: int = g.state.match.turn.value
         g.state.play(tuple(tuple(move[i : i + 2]) for i in range(0, len(move), 2)))
-        return await _update(game_id, g.state)
+        g.swap_clock(turn_owner)
+        return await _update(game_id, g)
     except backgammon.backgammon.BackgammonError as error:
         raise ValueError(error)
 
@@ -349,8 +352,10 @@ async def _reject(
 ) -> ResponseType:
     """Double and return an update response."""
     try:
+        turn_owner: int = g.state.match.turn.value
         g.state.reject_double()
-        return await _update(game_id, g.state)
+        g.swap_clock(turn_owner)
+        return await _update(game_id, g)
     except backgammon.backgammon.BackgammonError as error:
         raise ValueError(error)
 
@@ -365,7 +370,7 @@ async def _roll(
     """Roll the dice and return an update response."""
     try:
         g.state.roll()
-        return await _update(game_id, g.state)
+        return await _update(game_id, g)
     except backgammon.backgammon.BackgammonError as error:
         raise ValueError(error)
 
@@ -379,20 +384,33 @@ async def _skip(
 ) -> ResponseType:
     """Skip the user's turn and return an update response."""
     try:
+        turn_owner: int = g.state.match.turn.value
         g.state.skip()
-        return await _update(game_id, g.state)
+        g.swap_clock(turn_owner)
+        return await _update(game_id, g)
     except backgammon.backgammon.BackgammonError as error:
         raise ValueError(error)
 
 
-async def _update(game_id: str, bg: backgammon.Backgammon) -> ResponseType:
+async def _update(game_id: str, g: game.Game, publish: bool = True) -> ResponseType:
     """Update the stored game state and return an update response."""
-    publish: bool = True
-
     conn: aioredis.Redis = await redis.get_connection()
+    key: str = f"game:{game_id}"
     pipeline: aioredis.commands.transaction.MultiExec = conn.multi_exec()
-    pipeline.hset(f"game:{game_id}", "position", bg.position.encode())
-    pipeline.hset(f"game:{game_id}", "match", bg.match.encode())
+    pipeline.hset(key, "position", g.state.position.encode())
+    pipeline.hset(key, "match", g.state.match.encode())
+    if g.time_0 is not None:
+        pipeline.hset(key, "time_0", g.time_0)
+    if g.time_1 is not None:
+        pipeline.hset(key, "time_1", g.time_1)
+    if g.timestamp is not None:
+        pipeline.hset(key, "timestamp", g.timestamp)
     await pipeline.execute()
 
-    return publish, {"code": ResponseCode.UPDATE.value, "id": bg.encode()}
+    return publish, {
+        "code": ResponseCode.UPDATE.value,
+        "id": g.state.encode(),
+        "time0": g.time_0,
+        "time1": g.time_1,
+        "timestamp": g.timestamp,
+    }
