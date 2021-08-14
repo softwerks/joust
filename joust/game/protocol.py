@@ -127,12 +127,12 @@ def _authorized(func: Callable) -> Callable:
     async def wrapper(
         game_id: str, session_token: str, *args, **kwargs
     ) -> Union[Callable, ResponseType]:
-        user: session.Session = await session.load(session_token)
-        if user.game_id == game_id:
+        s: session.Session = await session.load(session_token)
+        if s.game_id == game_id:
             g: game.Game = await game.load(game_id)
 
-            if user.id_ == g.get_turn():
-                return await func(game_id, session_token, user, g, *args, **kwargs)
+            if s.id_ == g.get_turn():
+                return await func(s, g, *args, **kwargs)
 
         return False, {"code": ResponseCode.ERROR.value, "error": "Unauthorized"}
 
@@ -203,8 +203,6 @@ async def _evaluate(
 
 @_authorized
 async def _accept(
-    game_id: str,
-    session_token: str,
     s: session.Session,
     g: game.Game,
 ) -> ResponseType:
@@ -213,7 +211,7 @@ async def _accept(
         turn_owner: int = g.state.match.turn.value
         g.state.accept_double()
         g.swap_clock(turn_owner)
-        return await _update(game_id, g)
+        return await _update(g)
     except backgammon.backgammon.BackgammonError as error:
         raise ValueError(error)
 
@@ -271,7 +269,7 @@ async def _connect(game_id: str, session_token: str) -> Tuple[ResponseType, ...]
         g.start_clock()
         publish_update = True
 
-    update_response: ResponseType = await _update(game_id, g, publish_update)
+    update_response: ResponseType = await _update(g, publish_update)
     responses += (update_response,)
 
     return responses
@@ -279,8 +277,6 @@ async def _connect(game_id: str, session_token: str) -> Tuple[ResponseType, ...]
 
 @_authorized
 async def _double(
-    game_id: str,
-    session_token: str,
     s: session.Session,
     g: game.Game,
 ) -> ResponseType:
@@ -289,7 +285,7 @@ async def _double(
         turn_owner: int = g.state.match.turn.value
         g.state.double()
         g.swap_clock(turn_owner)
-        return await _update(game_id, g)
+        return await _update(g)
     except backgammon.backgammon.BackgammonError as error:
         raise ValueError(error)
 
@@ -327,8 +323,6 @@ async def _exit(game_id: str, session_token: str) -> Tuple[ResponseType, ...]:
 
 @_authorized
 async def _move(
-    game_id: str,
-    session_token: str,
     s: session.Session,
     g: game.Game,
     move: List[Optional[int]],
@@ -338,15 +332,13 @@ async def _move(
         turn_owner: int = g.state.match.turn.value
         g.state.play(tuple(tuple(move[i : i + 2]) for i in range(0, len(move), 2)))
         g.swap_clock(turn_owner)
-        return await _update(game_id, g)
+        return await _update(g)
     except backgammon.backgammon.BackgammonError as error:
         raise ValueError(error)
 
 
 @_authorized
 async def _reject(
-    game_id: str,
-    session_token: str,
     s: session.Session,
     g: game.Game,
 ) -> ResponseType:
@@ -355,30 +347,26 @@ async def _reject(
         turn_owner: int = g.state.match.turn.value
         g.state.reject_double()
         g.swap_clock(turn_owner)
-        return await _update(game_id, g)
+        return await _update(g)
     except backgammon.backgammon.BackgammonError as error:
         raise ValueError(error)
 
 
 @_authorized
 async def _roll(
-    game_id: str,
-    session_token: str,
     s: session.Session,
     g: game.Game,
 ) -> ResponseType:
     """Roll the dice and return an update response."""
     try:
         g.state.roll()
-        return await _update(game_id, g)
+        return await _update(g)
     except backgammon.backgammon.BackgammonError as error:
         raise ValueError(error)
 
 
 @_authorized
 async def _skip(
-    game_id: str,
-    session_token: str,
     s: session.Session,
     g: game.Game,
 ) -> ResponseType:
@@ -387,25 +375,14 @@ async def _skip(
         turn_owner: int = g.state.match.turn.value
         g.state.skip()
         g.swap_clock(turn_owner)
-        return await _update(game_id, g)
+        return await _update(g)
     except backgammon.backgammon.BackgammonError as error:
         raise ValueError(error)
 
 
-async def _update(game_id: str, g: game.Game, publish: bool = True) -> ResponseType:
+async def _update(g: game.Game, publish: bool = True) -> ResponseType:
     """Update the stored game state and return an update response."""
-    conn: aioredis.Redis = await redis.get_connection()
-    key: str = f"game:{game_id}"
-    pipeline: aioredis.commands.transaction.MultiExec = conn.multi_exec()
-    pipeline.hset(key, "position", g.state.position.encode())
-    pipeline.hset(key, "match", g.state.match.encode())
-    if g.time_0 is not None:
-        pipeline.hset(key, "time_0", g.time_0)
-    if g.time_1 is not None:
-        pipeline.hset(key, "time_1", g.time_1)
-    if g.timestamp is not None:
-        pipeline.hset(key, "timestamp", g.timestamp)
-    await pipeline.execute()
+    await g.update()
 
     return publish, {
         "code": ResponseCode.UPDATE.value,

@@ -51,6 +51,21 @@ class Game:
     def __post_init__(self) -> None:
         self.state = backgammon.Backgammon(self.position, self.match)
 
+    async def update(self) -> None:
+        """Update the game in redis."""
+        conn: aioredis.Redis = await redis.get_connection()
+        key: str = f"game:{self.id_}"
+        pipeline: aioredis.commands.transaction.MultiExec = conn.multi_exec()
+        pipeline.hset(key, "position", self.state.position.encode())
+        pipeline.hset(key, "match", self.state.match.encode())
+        if self.time_0 is not None:
+            pipeline.hset(key, "time_0", self.time_0)
+        if self.time_1 is not None:
+            pipeline.hset(key, "time_1", self.time_1)
+        if self.timestamp is not None:
+            pipeline.hset(key, "timestamp", self.timestamp)
+        await pipeline.execute()
+
     async def get_player(self, session_id: str) -> Optional[int]:
         """Return the user's player ID or None."""
         player: Optional[int] = None
