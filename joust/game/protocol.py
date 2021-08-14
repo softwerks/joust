@@ -210,7 +210,7 @@ async def _accept(
     try:
         turn_owner: int = g.state.match.turn.value
         g.state.accept_double()
-        g.swap_clock(turn_owner)
+        await g.swap_clock(turn_owner)
         return await _update(g)
     except backgammon.backgammon.BackgammonError as error:
         raise ValueError(error)
@@ -266,7 +266,7 @@ async def _connect(game_id: str, session_token: str) -> Tuple[ResponseType, ...]
         and g.player_1 != None
     ):
         g.state.start()
-        g.start_clock()
+        await g.start_clock()
         publish_update = True
 
     update_response: ResponseType = await _update(g, publish_update)
@@ -284,7 +284,7 @@ async def _double(
     try:
         turn_owner: int = g.state.match.turn.value
         g.state.double()
-        g.swap_clock(turn_owner)
+        await g.swap_clock(turn_owner)
         return await _update(g)
     except backgammon.backgammon.BackgammonError as error:
         raise ValueError(error)
@@ -331,7 +331,7 @@ async def _move(
     try:
         turn_owner: int = g.state.match.turn.value
         g.state.play(tuple(tuple(move[i : i + 2]) for i in range(0, len(move), 2)))
-        g.swap_clock(turn_owner)
+        await g.swap_clock(turn_owner)
         return await _update(g)
     except backgammon.backgammon.BackgammonError as error:
         raise ValueError(error)
@@ -346,7 +346,7 @@ async def _reject(
     try:
         turn_owner: int = g.state.match.turn.value
         g.state.reject_double()
-        g.swap_clock(turn_owner)
+        await g.swap_clock(turn_owner)
         return await _update(g)
     except backgammon.backgammon.BackgammonError as error:
         raise ValueError(error)
@@ -374,7 +374,7 @@ async def _skip(
     try:
         turn_owner: int = g.state.match.turn.value
         g.state.skip()
-        g.swap_clock(turn_owner)
+        await g.swap_clock(turn_owner)
         return await _update(g)
     except backgammon.backgammon.BackgammonError as error:
         raise ValueError(error)

@@ -123,12 +123,13 @@ class Game:
         """Return the time in milliseconds since the epoch."""
         return int(time.time() * 1000)
 
-    def start_clock(self) -> None:
+    async def start_clock(self) -> None:
         """Set the players' clocks and record the current time."""
         self.time_0 = self.time_1 = str(self.state.match.length * MATCH_TIME)
         self.timestamp = str(self.ms_timestamp())
+        await self._update_clock()
 
-    def swap_clock(self, turn_owner: int) -> None:
+    async def swap_clock(self, turn_owner: int) -> None:
         """Stop the turn owner's clock and start the opponent's clock."""
         new_timestamp: int = self.ms_timestamp()
 
@@ -140,6 +141,16 @@ class Game:
             self.time_1 = str(int(self.time_1) - elapsed)
 
         self.timestamp = str(new_timestamp)
+
+        await self._update_clock()
+
+    async def _update_clock(self):
+        reserve: int = int(
+            self.time_0 if self.state.match.turn.value == 0 else self.time_1
+        )
+
+        conn: aioredis.Redis = await redis.get_connection()
+        await conn.zadd("clock", int(self.timestamp) + reserve + DELAY_TIME, self.id_)
 
 
 async def load(game_id: str) -> Game:
