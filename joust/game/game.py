@@ -66,6 +66,9 @@ class Game:
             pipeline.hset(key, "timestamp", self.timestamp)
         await pipeline.execute()
 
+        if self.state.match.game_state is backgammon.match.GameState.GAME_OVER:
+            await self.stop_clock()
+
     async def get_player(self, session_id: str) -> Optional[int]:
         """Return the user's player ID or None."""
         player: Optional[int] = None
@@ -151,6 +154,10 @@ class Game:
 
         conn: aioredis.Redis = await redis.get_connection()
         await conn.zadd("clock", int(self.timestamp) + reserve + DELAY_TIME, self.id_)
+
+    async def stop_clock(self):
+        conn: aioredis.Redis = await redis.get_connection()
+        await conn.zrem("clock", self.id_)
 
 
 async def load(game_id: str) -> Game:
