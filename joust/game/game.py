@@ -14,12 +14,17 @@
 
 import dataclasses
 import enum
+import time
 from typing import Dict, Optional
 
 import aioredis
 import backgammon
 
 from joust import redis
+
+
+MATCH_TIME: int = 120000  # 2 minutes / point
+DELAY_TIME: int = 15000  # 15 seconds / turn
 
 
 @enum.unique
@@ -39,9 +44,30 @@ class Game:
     player_1: Optional[str] = None
     status_0: Optional[str] = None
     status_1: Optional[str] = None
+    time_0: str = "0"
+    time_1: str = "0"
+    timestamp: str = "0"
 
     def __post_init__(self) -> None:
         self.state = backgammon.Backgammon(self.position, self.match)
+
+    async def update(self) -> None:
+        """Update the game in redis."""
+        conn: aioredis.Redis = await redis.get_connection()
+        key: str = f"game:{self.id_}"
+        pipeline: aioredis.commands.transaction.MultiExec = conn.multi_exec()
+        pipeline.hset(key, "position", self.state.position.encode())
+        pipeline.hset(key, "match", self.state.match.encode())
+        if self.time_0 is not None:
+            pipeline.hset(key, "time_0", self.time_0)
+        if self.time_1 is not None:
+            pipeline.hset(key, "time_1", self.time_1)
+        if self.timestamp is not None:
+            pipeline.hset(key, "timestamp", self.timestamp)
+        await pipeline.execute()
+
+        if self.state.match.game_state is backgammon.match.GameState.GAME_OVER:
+            await self.stop_clock()
 
     async def get_player(self, session_id: str) -> Optional[int]:
         """Return the user's player ID or None."""
@@ -95,6 +121,43 @@ class Game:
         """Delete the game."""
         conn: aioredis.Redis = await redis.get_connection()
         await conn.delete(f"game:{self.id_}")
+
+    def ms_timestamp(self) -> int:
+        """Return the time in milliseconds since the epoch."""
+        return int(time.time() * 1000)
+
+    async def start_clock(self) -> None:
+        """Set the players' clocks and record the current time."""
+        self.time_0 = self.time_1 = str(self.state.match.length * MATCH_TIME)
+        self.timestamp = str(self.ms_timestamp())
+        await self._update_clock()
+
+    async def swap_clock(self, turn_owner: int) -> None:
+        """Stop the turn owner's clock and start the opponent's clock."""
+        new_timestamp: int = self.ms_timestamp()
+
+        elapsed: int = max(0, (new_timestamp - int(self.timestamp)) - DELAY_TIME)
+
+        if turn_owner == 0:
+            self.time_0 = str(int(self.time_0) - elapsed)
+        else:
+            self.time_1 = str(int(self.time_1) - elapsed)
+
+        self.timestamp = str(new_timestamp)
+
+        await self._update_clock()
+
+    async def _update_clock(self):
+        reserve: int = int(
+            self.time_0 if self.state.match.turn.value == 0 else self.time_1
+        )
+
+        conn: aioredis.Redis = await redis.get_connection()
+        await conn.zadd("clock", int(self.timestamp) + reserve + DELAY_TIME, self.id_)
+
+    async def stop_clock(self):
+        conn: aioredis.Redis = await redis.get_connection()
+        await conn.zrem("clock", self.id_)
 
 
 async def load(game_id: str) -> Game:
