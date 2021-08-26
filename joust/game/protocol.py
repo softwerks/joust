@@ -45,6 +45,7 @@ class Opcode(enum.Enum):
     EXIT: str = "exit"
     MOVE: str = "move"
     REJECT: str = "reject"
+    RESIGN: str = "resign"
     ROLL: str = "roll"
     SKIP: str = "skip"
 
@@ -71,6 +72,11 @@ payload_schema: Dict[str, Any] = {
             "minItems": 2,
             "maxItems": 8,
             "items": {"type": ["integer", "null"]},
+        },
+        "resign": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 3,
         },
     },
     "required": ["opcode"],
@@ -193,6 +199,15 @@ async def _evaluate(
             raise ValueError("Missing move")
     elif opcode is Opcode.REJECT:
         responses.append(await _reject(game_id, session_token))
+    elif opcode is Opcode.RESIGN:
+        try:
+            responses.append(
+                await _resign(
+                    game_id, session_token, backgammon.match.Resign(payload["resign"])
+                )
+            )
+        except KeyError:
+            raise ValueError("Missing resign")
     elif opcode is Opcode.ROLL:
         responses.append(await _roll(game_id, session_token))
     elif opcode is Opcode.SKIP:
@@ -206,10 +221,13 @@ async def _accept(
     s: session.Session,
     g: game.Game,
 ) -> ResponseType:
-    """Double and return an update response."""
+    """Accept a double or resignation and return an update response."""
     try:
         turn_owner: int = g.state.match.turn.value
-        g.state.accept_double()
+        if g.state.match.resign:
+            g.state.accept_resignation()
+        else:
+            g.state.accept_double()
         await g.swap_clock(turn_owner)
         return await _update(g)
     except backgammon.backgammon.BackgammonError as error:
@@ -342,10 +360,29 @@ async def _reject(
     s: session.Session,
     g: game.Game,
 ) -> ResponseType:
-    """Double and return an update response."""
+    """Reject a double or resignation and return an update response."""
     try:
         turn_owner: int = g.state.match.turn.value
-        g.state.reject_double()
+        if g.state.match.resign:
+            g.state.reject_resignation()
+        else:
+            g.state.reject_double()
+        await g.swap_clock(turn_owner)
+        return await _update(g)
+    except backgammon.backgammon.BackgammonError as error:
+        raise ValueError(error)
+
+
+@_authorized
+async def _resign(
+    s: session.Session,
+    g: game.Game,
+    resign_type: backgammon.match.Resign,
+) -> ResponseType:
+    """Offer the resignation and return an update response."""
+    try:
+        turn_owner: int = g.state.match.turn.value
+        g.state.resign(resign_type)
         await g.swap_clock(turn_owner)
         return await _update(g)
     except backgammon.backgammon.BackgammonError as error:
